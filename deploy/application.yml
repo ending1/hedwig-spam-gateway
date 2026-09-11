@@ -1,0 +1,53 @@
+# 개발서버 통신 검증용 설정 - 운영 Hedwig(포트 25/143)는 건드리지 않고, 게이트웨이는 별도 포트로 기동해
+# backend만 기존 Hedwig의 실제 SMTP 포트(127.0.0.1:25)를 바라보게 한다.
+server:
+  port: 18091
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: gateway,health
+
+spring:
+  datasource:
+    url: jdbc:h2:mem:gateway;MODE=MySQL;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+gateway:
+  instance-id: gateway-devtest
+  listen-port: 12525
+  reuse-port: false
+  db-dialect: ansi
+  backend:
+    host: 127.0.0.1
+    port: 25
+  rate-limit:
+    window-seconds: 10
+    threshold: 100
+  ban:
+    default-duration-minutes: 60
+    poll-interval-seconds: 5
+  failover:
+    policy: fail-open
+  os-block:
+    enabled: false
+  outbound:
+    enabled: true
+    bind-host: 0.0.0.0
+    listen-port: 12526
+    reuse-port: false
+    spool-dir: /home/egov/hedwig_spam/spool/outbound
+    max-retries: 5
+    retry-delay-seconds: 120
+    delay-after-retries: 2
+    worker-pool-size: 5
+    worker-max-pool-size: 10
+    delay-worker-pool-size: 2
+    delay-worker-max-pool-size: 4
+    dns-timeout-millis: 5000
+    smtp-connect-timeout-millis: 5000
+    smtp-timeout-millis: 5000
+    auth-required: false

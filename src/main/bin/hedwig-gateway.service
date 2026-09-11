@@ -1,0 +1,18 @@
+# systemd 예시 유닛 (Linux 전용). /etc/systemd/system/hedwig-gateway.service 에 배치 후
+# systemctl daemon-reload && systemctl enable --now hedwig-gateway
+# 프로세스 다운 시 자동 재기동을 위해 Restart=always 사용 (스펙 3.4 워치독 역할).
+
+[Unit]
+Description=Hedwig Spam Gateway
+After=network.target
+
+[Service]
+Type=simple
+User=hedwig
+WorkingDirectory=/opt/hedwig-gateway
+ExecStart=/usr/bin/java -Xms256m -Xmx512m -jar /opt/hedwig-gateway/hedwig-spam-gateway.jar --spring.config.location=/opt/hedwig-gateway/conf/application.yml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

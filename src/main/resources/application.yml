@@ -1,0 +1,101 @@
+# server.port(Actuator용 내장 웹서버)는 SO_REUSEPORT 대상이 아니므로 인스턴스마다 반드시 다르게 지정해야 한다.
+# 예: instance1 -> --server.port=8090 --gateway.instance-id=gateway-1
+#     instance2 -> --server.port=8091 --gateway.instance-id=gateway-2
+# 반면 gateway.listen-port(실제 SMTP 릴레이 포트)는 Linux에서 reuse-port=true면 인스턴스끼리 공유 가능하다.
+server:
+  port: 8090
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: gateway,health
+
+spring:
+  datasource:
+    # 현장 설치 시 Hedwig이 사용 중인 동일 RDBMS 접속 정보로 교체한다 (default.properties의 jdbc.* 참고).
+    url: jdbc:h2:mem:gateway;MODE=MySQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+gateway:
+  instance-id: gateway-1
+  listen-port: 2525
+  # Linux epoll SO_REUSEPORT로 동일 listen-port를 여러 인스턴스가 공유 (스펙 3.1). 비-Linux에서는 무시되고
+  # 일반 NIO로 폴백하므로, 그런 환경에서는 인스턴스마다 listen-port를 다르게 지정해야 한다.
+  reuse-port: true
+  db-dialect: ansi
+  backend:
+    host: 127.0.0.1
+    port: 25
+  rate-limit:
+    window-seconds: 10
+    threshold: 100
+  ban:
+    default-duration-minutes: 60
+    poll-interval-seconds: 5
+  failover:
+    policy: fail-open
+  os-block:
+    enabled: false
+  # 아웃바운드 완충 장치 - Hedwig default.properties의 smtp_gateway=<bind-host>:<listen-port>로 연동한다.
+  # Hedwig 코드는 변경하지 않는다. 이 리스너에 접수된 메일은 즉시 로컬 스풀에 저장되고, 실제 인터넷 발송은
+  # 별도 스레드풀(worker-pool-size~worker-max-pool-size)이 비동기로 처리해 Hedwig 프로세스(IMAP 포함)의
+  # 자원을 발신 지연/DNS 지연으로부터 격리한다.
+  outbound:
+    enabled: true
+    bind-host: 127.0.0.1
+    listen-port: 2526
+    reuse-port: true
+    spool-dir: ../spool/outbound
+    max-retries: 5
+    retry-delay-seconds: 120
+    delay-after-retries: 2
+    worker-pool-size: 20
+    worker-max-pool-size: 40
+    delay-worker-pool-size: 5
+    delay-worker-max-pool-size: 10
+    dns-timeout-millis: 5000
+    smtp-connect-timeout-millis: 5000
+    smtp-timeout-millis: 5000
+    auth-required: false
+    auth-username:
+    auth-password:
+  # 인바운드 메일의 헤더/제목/본문/수신자를 LLM으로 분석해 스팸 여부를 판정한다 (첨부파일은 범위 밖).
+  # 판정 결과는 하드 거절이 아니라 X-Spam-* 헤더 태그로만 주입되며, 최종 판단은 사용자/Hedwig sieve 몫이다.
+  # enabled=false(기본값)면 SMTP를 파싱하지 않는 기존 순수 바이트 릴레이가 그대로 쓰인다.
+  # 분류기 장애/타임아웃은 fail-open(정상 메일로 간주, 태그 없이 전달)으로 처리한다.
+  spam-filter:
+    enabled: false
+    provider: gemma-local   # none | gemma-local | gemini | claude
+    timeout-millis: 15000
+    max-body-chars: 4000
+    worker-pool-size: 4
+    gemma:
+      base-url: http://localhost:11434
+      model: gemma2:7b
+    gemini:
+      api-key:
+      model: gemini-2.0-flash-lite
+    claude:
+      api-key:
+      model: claude-3-5-haiku-20241022
+  # RBL(DNSBL) 조회 - 발신 IP를 공개 블랙리스트 존에 조회해 알려진 스팸 발신원을 커넥션 단계에서 차단한다.
+  # 바이트릴레이/스팸필터 프록시 두 파이프라인 모두에 공통 적용. DNS 조회 실패/타임아웃은 fail-open(허용).
+  rbl:
+    enabled: false
+    zones:
+      - zen.spamhaus.org
+      - bl.spamcop.net
+    timeout-millis: 3000
+  # 그레이리스팅 - (발신IP, MAIL FROM, RCPT TO) 삼중항을 처음 보면 450으로 일시 거부하고, 표준 재시도
+  # 창 안에서 다시 오면 통과시킨다. RCPT TO를 봐야 하므로 spam-filter와 동일하게 SMTP 종단이 필요하다
+  # (spam-filter.enabled와 greylist.enabled 둘 중 하나라도 true면 프록시 파이프라인이 활성화된다).
+  # SO_REUSEPORT로 재시도가 다른 인스턴스로 갈 수 있어 상태는 공유 DB(hw_greylist)에 저장한다.
+  greylist:
+    enabled: false
+    min-retry-delay-minutes: 5
+    max-window-hours: 24
+    trust-period-days: 30
+    poll-interval-seconds: 10
