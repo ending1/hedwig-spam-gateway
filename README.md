@@ -37,6 +37,27 @@
 - 스팸봇 대부분은 재시도하지 않는다는 점을 이용한 저비용 필터
 - 여러 인스턴스가 SO_REUSEPORT로 트래픽을 나눠 받으므로 상태는 공유 DB(`hw_greylist`)에 저장
 
+### 6. 규칙기반(SpamAssassin류) 스팸 점수 필터
+- 영문/국문 스팸 상투어 키워드 + 제목 전체대문자·느낌표 과다·빈 본문 같은 휴리스틱을 점수로 합산해 임계치를 넘으면 스팸으로 판정
+- 관리자가 `extra-keywords`로 사내 전용 금칙어 추가 가능
+- LLM보다 먼저 실행되어, 이미 확신하는 스팸이면 느리고 비용이 드는 LLM 호출 자체를 건너뜀
+
+### 7. 관리자/사용자 화이트-블랙리스트
+- 이메일 정확 매치(`user@domain.com`) 또는 도메인 와일드카드(`@domain.com`) 지원, 전역 규칙과 특정 수신자 전용 규칙 모두 가능
+- 화이트리스트는 그레이리스팅·룰기반·LLM 스팸판정을 모두 건너뜀 (명시적 허용이 최우선)
+- 블랙리스트는 `blacklist-action` 설정에 따라 SMTP 단계에서 즉시 거절(`REJECT`, 550) 하거나 헤더 태그만 강제(`TAG`)
+- `/admin/mail-list` REST API(GET/POST/DELETE)로 관리, `X-Admin-Key` 헤더로 접근 제어 가능
+
+### 8. 관리자 통계 대시보드
+- `GET /admin/dashboard`에서 커넥션/밴/스팸판정/RBL/그레이리스팅/아웃바운드 지표를 5초 주기로 갱신되는 카드로 표시
+- 같은 화면에서 화이트/블랙리스트 추가·삭제도 가능 (별도 프론트엔드 빌드 없이 순수 HTML/JS)
+
+### 9. 아웃바운드 DKIM 서명
+- 이 게이트웨이를 거쳐 나가는 발신 메일에 `DKIM-Signature` 헤더를 추가 (RFC 6376, relaxed/relaxed 정규화, rsa-sha256)
+- 외부 라이브러리 없이 표준 Java 암호화 API만으로 직접 구현
+- 아웃바운드 스풀 접수 시점에 한 번 서명해 재시도 시에도 동일한 서명을 재사용
+- 개인키/도메인/셀렉터가 없으면 `enabled: false`로 두면 그만이며, 나중에 키를 발급받으면 설정만 채우면 바로 동작
+
 ## 아키텍처
 
 ```
@@ -52,7 +73,7 @@ Hedwig(smtp_gateway=) →│  hedwig-spam-gateway     │→ 실제 인터넷(DN
                     └─────────────────────────┘
 ```
 
-스팸필터·그레이리스팅이 모두 꺼져 있으면 인바운드는 SMTP를 파싱하지 않는 순수 바이트 릴레이로 동작합니다. 둘 중 하나라도 켜지면 SMTP를 종단하는 프록시로 전환됩니다 (DATA 본문/RCPT TO를 봐야 하기 때문).
+스팸필터·그레이리스팅·룰기반 필터·화이트-블랙리스트가 모두 꺼져 있으면 인바운드는 SMTP를 파싱하지 않는 순수 바이트 릴레이로 동작합니다. 넷 중 하나라도 켜지면 SMTP를 종단하는 프록시로 전환됩니다 (DATA 본문/RCPT TO를 봐야 하기 때문).
 
 ## 빌드
 
@@ -84,8 +105,12 @@ java -jar target/hedwig-spam-gateway.jar
 | `gateway.spam-filter.*` | LLM 스팸 판정 | enabled: false |
 | `gateway.rbl.*` | DNSBL 조회 | enabled: false |
 | `gateway.greylist.*` | 그레이리스팅 | enabled: false |
+| `gateway.rule-filter.*` | 규칙기반 스팸 점수 필터 | enabled: false |
+| `gateway.mail-list.*` | 화이트/블랙리스트 | enabled: false, blacklist-action: reject |
+| `gateway.admin.api-key` | `/admin/*` API 접근 제어 | (비어있음 = 인증 없음) |
+| `gateway.outbound.dkim.*` | 발신 메일 DKIM 서명 | enabled: false |
 
-## 모니터링
+## 모니터링 / 관리
 
 ```bash
 curl http://localhost:8090/actuator/gateway
@@ -93,13 +118,30 @@ curl http://localhost:8090/actuator/gateway
 
 인스턴스별 현재 커넥션 수, 밴 처리 건수, 아웃바운드 스풀 상태, 스팸 판정 건수, RBL/그레이리스팅 통계를 JSON으로 노출합니다. K8s 없이도 외부 크론/스크립트가 주기적으로 폴링해 이상을 탐지할 수 있습니다.
 
+사람이 보기 편한 화면은 `http://localhost:8090/admin/dashboard`에서 확인할 수 있고, 같은 곳에서 화이트/블랙리스트도 관리할 수 있습니다. 화이트/블랙리스트 API만 직접 쓰려면:
+
+```bash
+# 등록
+curl -X POST http://localhost:8090/admin/mail-list \
+  -H 'Content-Type: application/json' \
+  -d '{"listType":"BLACK","pattern":"@spam-domain.com","reason":"known spammer"}'
+
+# 조회
+curl http://localhost:8090/admin/mail-list
+
+# 삭제
+curl -X DELETE 'http://localhost:8090/admin/mail-list?listType=BLACK&pattern=%40spam-domain.com&recipient='
+```
+
+`gateway.admin.api-key`를 설정했다면 위 요청에 `-H 'X-Admin-Key: <값>'`을 추가해야 합니다. `gateway.mail-list.enabled=true`가 아니면 등록은 되지만 실제 필터링/조회 캐시에는 반영되지 않습니다.
+
 ## 테스트
 
 ```bash
 mvn test
 ```
 
-단위 테스트는 Mockito/H2로 외부 의존성 없이 동작합니다. 실제 로컬 Ollama(Gemma), RBL 실측(DNSBL 표준 테스트 IP `127.0.0.2`), 그레이리스팅 재시도 흐름은 개발 서버 환경에서 수동으로 검증했습니다.
+단위 테스트는 Mockito/H2로 외부 의존성 없이 동작합니다. 실제 로컬 Ollama(Gemma), RBL 실측(DNSBL 표준 테스트 IP `127.0.0.2`), 그레이리스팅 재시도 흐름, 규칙기반 필터의 실제 헤더 주입은 개발 서버 환경에서 수동으로 검증했습니다 (`deploy/` 디렉터리의 `FakeHedwig.java` 등이 그때 쓴 테스트용 가짜 백엔드/클라이언트입니다). DKIM 서명은 실제 개인키가 없어 RFC 구현 자체만 유닛테스트로 검증했고, 실제 메일 서비스(Gmail 등) 대상 검증 통과 여부는 확인하지 못했습니다.
 
 ## 하지 않는 것 (Out of Scope)
 
