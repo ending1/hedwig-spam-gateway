@@ -28,6 +28,9 @@ public class GatewayProperties {
     private final SpamFilter spamFilter = new SpamFilter();
     private final Rbl rbl = new Rbl();
     private final Greylist greylist = new Greylist();
+    private final MailList mailList = new MailList();
+    private final RuleFilter ruleFilter = new RuleFilter();
+    private final Admin admin = new Admin();
 
     public int getListenPort() {
         return listenPort;
@@ -95,6 +98,18 @@ public class GatewayProperties {
 
     public Greylist getGreylist() {
         return greylist;
+    }
+
+    public MailList getMailList() {
+        return mailList;
+    }
+
+    public RuleFilter getRuleFilter() {
+        return ruleFilter;
+    }
+
+    public Admin getAdmin() {
+        return admin;
     }
 
     public static class RateLimit {
@@ -212,6 +227,7 @@ public class GatewayProperties {
         private boolean authRequired = false;
         private String authUsername;
         private String authPassword;
+        private final Dkim dkim = new Dkim();
 
         public boolean isEnabled() {
             return enabled;
@@ -219,6 +235,10 @@ public class GatewayProperties {
 
         public void setEnabled(boolean enabled) {
             this.enabled = enabled;
+        }
+
+        public Dkim getDkim() {
+            return dkim;
         }
 
         public String getBindHost() {
@@ -355,6 +375,59 @@ public class GatewayProperties {
 
         public void setAuthPassword(String authPassword) {
             this.authPassword = authPassword;
+        }
+
+        /**
+         * 이 게이트웨이를 거쳐 나가는 발신 메일에 DKIM-Signature 헤더를 추가한다 (RFC 6376,
+         * relaxed/relaxed 정규화, rsa-sha256 고정). 개인키가 없으면 enabled=false로 두면 그만이다.
+         */
+        public static class Dkim {
+            private boolean enabled = false;
+            private String domain;
+            private String selector = "default";
+            private String privateKeyPath;
+            private java.util.List<String> headersToSign = new java.util.ArrayList<>(
+                    java.util.Arrays.asList("From", "To", "Subject", "Date", "Message-ID"));
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public String getDomain() {
+                return domain;
+            }
+
+            public void setDomain(String domain) {
+                this.domain = domain;
+            }
+
+            public String getSelector() {
+                return selector;
+            }
+
+            public void setSelector(String selector) {
+                this.selector = selector;
+            }
+
+            public String getPrivateKeyPath() {
+                return privateKeyPath;
+            }
+
+            public void setPrivateKeyPath(String privateKeyPath) {
+                this.privateKeyPath = privateKeyPath;
+            }
+
+            public java.util.List<String> getHeadersToSign() {
+                return headersToSign;
+            }
+
+            public void setHeadersToSign(java.util.List<String> headersToSign) {
+                this.headersToSign = headersToSign;
+            }
         }
     }
 
@@ -574,6 +647,80 @@ public class GatewayProperties {
 
         public void setPollIntervalSeconds(int pollIntervalSeconds) {
             this.pollIntervalSeconds = pollIntervalSeconds;
+        }
+    }
+
+    public enum BlacklistAction {
+        REJECT, TAG
+    }
+
+    /**
+     * 관리자/사용자 화이트리스트-블랙리스트. 발신자(이메일 또는 도메인) 단위로 관리하며,
+     * 화이트리스트는 RBL/그레이리스팅/룰기반/LLM 스팸판정을 모두 건너뛰고, 블랙리스트는
+     * blacklist-action 설정에 따라 즉시 거절하거나 헤더 태그만 남긴다.
+     */
+    public static class MailList {
+        private boolean enabled = false;
+        private BlacklistAction blacklistAction = BlacklistAction.REJECT;
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public BlacklistAction getBlacklistAction() {
+            return blacklistAction;
+        }
+
+        public void setBlacklistAction(BlacklistAction blacklistAction) {
+            this.blacklistAction = blacklistAction;
+        }
+    }
+
+    /** 전통적인 규칙기반(SpamAssassin류) 스팸 점수 필터. LLM 호출 전에 먼저 돌려 확실한 스팸을 빠르게 거른다. */
+    public static class RuleFilter {
+        private boolean enabled = false;
+        private double spamThreshold = 5.0;
+        private java.util.List<String> extraKeywords = new java.util.ArrayList<>();
+
+        public boolean isEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public double getSpamThreshold() {
+            return spamThreshold;
+        }
+
+        public void setSpamThreshold(double spamThreshold) {
+            this.spamThreshold = spamThreshold;
+        }
+
+        public java.util.List<String> getExtraKeywords() {
+            return extraKeywords;
+        }
+
+        public void setExtraKeywords(java.util.List<String> extraKeywords) {
+            this.extraKeywords = extraKeywords;
+        }
+    }
+
+    /** 관리자 REST API(/admin/*) 접근 제어. api-key가 비어있으면 인증 없이 열려있다 (개발용 기본값). */
+    public static class Admin {
+        private String apiKey;
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey;
         }
     }
 }

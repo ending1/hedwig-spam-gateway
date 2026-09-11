@@ -36,7 +36,7 @@ class SmtpSubmissionHandlerTest {
                 new DelimiterBasedFrameDecoder(8192, Delimiters.lineDelimiter()),
                 new StringDecoder(),
                 new StringEncoder(),
-                new SmtpSubmissionHandler(spoolService, properties.getOutbound(), "gateway-test"));
+                new SmtpSubmissionHandler(spoolService, properties.getOutbound(), "gateway-test", new DkimSigner(properties)));
     }
 
     private void send(String line) {

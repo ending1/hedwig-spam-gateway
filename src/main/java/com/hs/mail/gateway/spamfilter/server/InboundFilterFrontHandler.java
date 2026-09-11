@@ -3,8 +3,11 @@ package com.hs.mail.gateway.spamfilter.server;
 import com.hs.mail.gateway.config.GatewayProperties;
 import com.hs.mail.gateway.greylist.GreylistService;
 import com.hs.mail.gateway.greylist.GreylistVerdict;
+import com.hs.mail.gateway.maillist.MailListService;
+import com.hs.mail.gateway.maillist.MailListVerdict;
 import com.hs.mail.gateway.monitor.ConnectionStats;
 import com.hs.mail.gateway.monitor.SpamFilterStats;
+import com.hs.mail.gateway.spamfilter.RuleBasedSpamChecker;
 import com.hs.mail.gateway.spamfilter.SpamCheckRequest;
 import com.hs.mail.gateway.spamfilter.SpamClassifier;
 import com.hs.mail.gateway.spamfilter.SpamVerdict;
@@ -50,6 +53,8 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
     private final ConnectionStats connectionStats;
     private final ExecutorService classifierExecutor;
     private final GreylistService greylistService;
+    private final MailListService mailListService;
+    private final RuleBasedSpamChecker ruleBasedSpamChecker;
 
     private final Deque<String> pending = new ArrayDeque<>();
     private final ProxySession session = new ProxySession();
@@ -57,13 +62,16 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
 
     public InboundFilterFrontHandler(GatewayProperties properties, SpamClassifier classifier,
                                       SpamFilterStats spamStats, ConnectionStats connectionStats,
-                                      ExecutorService classifierExecutor, GreylistService greylistService) {
+                                      ExecutorService classifierExecutor, GreylistService greylistService,
+                                      MailListService mailListService, RuleBasedSpamChecker ruleBasedSpamChecker) {
         this.properties = properties;
         this.classifier = classifier;
         this.spamStats = spamStats;
         this.connectionStats = connectionStats;
         this.classifierExecutor = classifierExecutor;
         this.greylistService = greylistService;
+        this.mailListService = mailListService;
+        this.ruleBasedSpamChecker = ruleBasedSpamChecker;
     }
 
     @Override
@@ -134,6 +142,8 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
             if (m.find()) {
                 session.mailFrom = m.group(1);
                 session.recipients = new java.util.ArrayList<>();
+                session.whitelisted = false;
+                session.forceSpamTag = false;
             }
         } else if (upper.equals("DATA") || upper.startsWith("DATA ")) {
             session.dataPending = true;
@@ -144,9 +154,11 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
     }
 
     /**
-     * 그레이리스팅 활성 시 RCPT TO는 즉시 릴레이하지 않고 (발신IP, MAIL FROM, RCPT TO) 삼중항을
-     * 먼저 확인한다. DEFER면 backend에 전달하지 않고 게이트웨이가 직접 450을 응답해 발신측 재시도를
-     * 유도한다 (스팸봇은 대부분 재시도하지 않음). DB 조회는 블로킹이므로 classifierExecutor에서 비동기 수행.
+     * RCPT TO는 즉시 릴레이하지 않고 먼저 화이트/블랙리스트, 그 다음 그레이리스팅을 확인한다.
+     * 화이트리스트 매치는 이후 DATA 단계의 스팸 판정(룰기반/LLM)도 모두 건너뛴다. 블랙리스트는
+     * {@code gateway.mail-list.blacklist-action} 설정에 따라 즉시 거절하거나 헤더 태그만 강제한다.
+     * 둘 다 아니면(NEUTRAL) 기존처럼 그레이리스팅 삼중항을 확인해 DEFER/ALLOW를 판정한다.
+     * DB 조회는 블로킹이므로 classifierExecutor에서 비동기 수행.
      */
     private void handleRcptTo(ChannelHandlerContext ctx, String line) {
         Matcher m = RCPT_TO_PATTERN.matcher(line);
@@ -155,9 +167,30 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
             return;
         }
         String rcpt = m.group(1);
-        String clientIp = clientIp(ctx);
         String mailFrom = session.mailFrom;
 
+        MailListVerdict listVerdict = mailListService.check(mailFrom, rcpt);
+        if (listVerdict == MailListVerdict.BLACK
+                && properties.getMailList().getBlacklistAction() == GatewayProperties.BlacklistAction.REJECT) {
+            log.info("블랙리스트 차단(REJECT): from={}, to={}", mailFrom, rcpt);
+            ctx.writeAndFlush("550 5.7.1 Blocked by sender blacklist\r\n");
+            return;
+        }
+        if (listVerdict == MailListVerdict.WHITE) {
+            session.whitelisted = true;
+            session.recipients.add(rcpt);
+            sendToBackend(line);
+            return;
+        }
+        if (listVerdict == MailListVerdict.BLACK) {
+            log.info("블랙리스트 차단(TAG): from={}, to={}", mailFrom, rcpt);
+            session.forceSpamTag = true;
+            session.recipients.add(rcpt);
+            sendToBackend(line);
+            return;
+        }
+
+        String clientIp = clientIp(ctx);
         ctx.channel().config().setAutoRead(false);
         classifierExecutor.submit(() -> {
             GreylistVerdict verdict = greylistService.check(clientIp, mailFrom, rcpt);
@@ -188,13 +221,37 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
     }
 
     private void classifyAndForward(ChannelHandlerContext ctx) {
-        ctx.channel().config().setAutoRead(false);
         List<String> bufferedLines = session.dataBuffer;
+
+        if (session.whitelisted) {
+            deliverBufferedData(ctx, SpamVerdict.ham("mail-list-whitelist"), bufferedLines);
+            return;
+        }
+        if (session.forceSpamTag) {
+            deliverBufferedData(ctx, new SpamVerdict(true, 1.0, "발신자 블랙리스트", "mail-list"), bufferedLines);
+            return;
+        }
+
         String mailFrom = session.mailFrom;
         List<String> recipients = session.recipients;
         SpamCheckRequest request = SpamCheckRequest.from(mailFrom, recipients, bufferedLines,
                 properties.getSpamFilter().getMaxBodyChars());
 
+        if (properties.getRuleFilter().isEnabled()) {
+            SpamVerdict ruleVerdict = ruleBasedSpamChecker.evaluate(request);
+            if (ruleVerdict.isSpam()) {
+                // 룰기반 필터가 이미 확신하는 스팸이면 느리고 비용이 드는 LLM 호출을 건너뛴다.
+                deliverBufferedData(ctx, ruleVerdict, bufferedLines);
+                return;
+            }
+        }
+
+        if (!properties.getSpamFilter().isEnabled()) {
+            deliverBufferedData(ctx, SpamVerdict.ham("none"), bufferedLines);
+            return;
+        }
+
+        ctx.channel().config().setAutoRead(false);
         classifierExecutor.submit(() -> {
             SpamVerdict verdict;
             try {

@@ -35,15 +35,17 @@ public class OutboundSubmissionServer implements SmartLifecycle {
 
     private final GatewayProperties properties;
     private final OutboundSpoolService spoolService;
+    private final DkimSigner dkimSigner;
 
     private EventLoopGroup bossGroup;
     private EventLoopGroup workerGroup;
     private Channel serverChannel;
     private volatile boolean running = false;
 
-    public OutboundSubmissionServer(GatewayProperties properties, OutboundSpoolService spoolService) {
+    public OutboundSubmissionServer(GatewayProperties properties, OutboundSpoolService spoolService, DkimSigner dkimSigner) {
         this.properties = properties;
         this.spoolService = spoolService;
+        this.dkimSigner = dkimSigner;
     }
 
     @Override
@@ -62,7 +64,7 @@ public class OutboundSubmissionServer implements SmartLifecycle {
                         .addLast("frameDecoder", new DelimiterBasedFrameDecoder(8192, Delimiters.lineDelimiter()))
                         .addLast("stringDecoder", new StringDecoder())
                         .addLast("stringEncoder", new StringEncoder())
-                        .addLast("smtpSubmission", new SmtpSubmissionHandler(spoolService, cfg, properties.getInstanceId()));
+                        .addLast("smtpSubmission", new SmtpSubmissionHandler(spoolService, cfg, properties.getInstanceId(), dkimSigner));
             }
         };
 

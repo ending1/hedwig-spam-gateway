@@ -5,6 +5,8 @@ import com.hs.mail.gateway.ban.BanListService;
 import com.hs.mail.gateway.config.GatewayProperties;
 import com.hs.mail.gateway.greylist.GreylistDao;
 import com.hs.mail.gateway.greylist.GreylistService;
+import com.hs.mail.gateway.maillist.MailListDao;
+import com.hs.mail.gateway.maillist.MailListService;
 import com.hs.mail.gateway.monitor.ConnectionStats;
 import com.hs.mail.gateway.monitor.GreylistStats;
 import com.hs.mail.gateway.monitor.RblStats;
@@ -13,6 +15,7 @@ import com.hs.mail.gateway.osblock.IptablesBlocker;
 import com.hs.mail.gateway.rbl.RblCheckExecutor;
 import com.hs.mail.gateway.rbl.RblChecker;
 import com.hs.mail.gateway.spamfilter.NoopSpamClassifier;
+import com.hs.mail.gateway.spamfilter.RuleBasedSpamChecker;
 import com.hs.mail.gateway.spamfilter.SpamClassifierExecutor;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
@@ -76,9 +79,11 @@ class GatewayIntegrationTest {
         banListService = new BanListService(dao, properties, mock(IptablesBlocker.class));
 
         GreylistService greylistService = new GreylistService(mock(GreylistDao.class), properties, new GreylistStats());
+        MailListService mailListService = new MailListService(mock(MailListDao.class), properties);
         GatewayChannelInitializer initializer = new GatewayChannelInitializer(properties, banListService,
                 new ConnectionStats(), new NoopSpamClassifier(), new SpamFilterStats(), new SpamClassifierExecutor(properties),
-                greylistService, new RblChecker(properties), new RblStats(), new RblCheckExecutor());
+                greylistService, new RblChecker(properties), new RblStats(), new RblCheckExecutor(),
+                mailListService, new RuleBasedSpamChecker(properties));
 
         bossGroup = new NioEventLoopGroup(1);
         workerGroup = new NioEventLoopGroup();

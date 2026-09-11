@@ -3,9 +3,12 @@ package com.hs.mail.gateway.spamfilter.server;
 import com.hs.mail.gateway.config.GatewayProperties;
 import com.hs.mail.gateway.greylist.GreylistDao;
 import com.hs.mail.gateway.greylist.GreylistService;
+import com.hs.mail.gateway.maillist.MailListDao;
+import com.hs.mail.gateway.maillist.MailListService;
 import com.hs.mail.gateway.monitor.ConnectionStats;
 import com.hs.mail.gateway.monitor.GreylistStats;
 import com.hs.mail.gateway.monitor.SpamFilterStats;
+import com.hs.mail.gateway.spamfilter.RuleBasedSpamChecker;
 import com.hs.mail.gateway.spamfilter.SpamCheckRequest;
 import com.hs.mail.gateway.spamfilter.SpamClassifier;
 import com.hs.mail.gateway.spamfilter.SpamVerdict;
@@ -58,10 +61,17 @@ class InboundFilterFrontHandlerTest {
         GatewayProperties properties = new GatewayProperties();
         GreylistService alwaysAllow = new GreylistService(
                 org.mockito.Mockito.mock(GreylistDao.class), properties, new GreylistStats());
-        start(classifier, alwaysAllow);
+        MailListService neutralMailList = new MailListService(org.mockito.Mockito.mock(MailListDao.class), properties);
+        start(classifier, alwaysAllow, neutralMailList);
     }
 
     private void start(SpamClassifier classifier, GreylistService greylistService) throws Exception {
+        GatewayProperties properties = new GatewayProperties();
+        MailListService neutralMailList = new MailListService(org.mockito.Mockito.mock(MailListDao.class), properties);
+        start(classifier, greylistService, neutralMailList);
+    }
+
+    private void start(SpamClassifier classifier, GreylistService greylistService, MailListService mailListService) throws Exception {
         fakeBackend = new FakeHedwigServer();
         fakeBackend.start();
 
@@ -87,7 +97,8 @@ class InboundFilterFrontHandlerTest {
                                 .addLast(new StringDecoder())
                                 .addLast(new StringEncoder())
                                 .addLast(new InboundFilterFrontHandler(properties, classifier, spamStats,
-                                        connectionStats, classifierExecutor, greylistService));
+                                        connectionStats, classifierExecutor, greylistService,
+                                        mailListService, new RuleBasedSpamChecker(properties)));
                     }
                 });
         serverChannel = bootstrap.bind(0).sync().channel();
@@ -197,6 +208,47 @@ class InboundFilterFrontHandlerTest {
             String response = in.readLine();
             assertTrue(response.startsWith("250"), "그레이리스팅 ALLOW는 backend의 실제 250 응답이어야 함: " + response);
         }
+    }
+
+    @Test
+    void 블랙리스트_REJECT면_RCPT_TO에_550_응답하고_backend에_전달하지_않는다() throws Exception {
+        GatewayProperties dummy = new GatewayProperties();
+        MailListService blacklisting = org.mockito.Mockito.mock(MailListService.class);
+        org.mockito.Mockito.when(blacklisting.check(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(com.hs.mail.gateway.maillist.MailListVerdict.BLACK);
+        GreylistService alwaysAllow = new GreylistService(
+                org.mockito.Mockito.mock(GreylistDao.class), dummy, new GreylistStats());
+        start(fixedVerdictClassifier(false), alwaysAllow, blacklisting);
+
+        try (Socket socket = new Socket("127.0.0.1", gatewayPort)) {
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+            PrintWriter out = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8);
+
+            in.readLine();
+            out.print("EHLO client\r\n"); out.flush(); in.readLine();
+            out.print("MAIL FROM:<spammer@bad.com>\r\n"); out.flush(); in.readLine();
+            out.print("RCPT TO:<victim@handysoft.co.kr>\r\n"); out.flush();
+            String response = in.readLine();
+            assertTrue(response.startsWith("550"), "블랙리스트 REJECT는 550 응답이어야 함: " + response);
+        }
+    }
+
+    @Test
+    void 화이트리스트면_스팸_판정_없이_그대로_전달된다() throws Exception {
+        GatewayProperties dummy = new GatewayProperties();
+        MailListService whitelisting = org.mockito.Mockito.mock(MailListService.class);
+        org.mockito.Mockito.when(whitelisting.check(org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString()))
+                .thenReturn(com.hs.mail.gateway.maillist.MailListVerdict.WHITE);
+        GreylistService alwaysAllow = new GreylistService(
+                org.mockito.Mockito.mock(GreylistDao.class), dummy, new GreylistStats());
+        // 분류기는 항상 스팸이라고 답하지만 화이트리스트가 우선해 태그가 붙으면 안 된다.
+        start(fixedVerdictClassifier(true), alwaysAllow, whitelisting);
+
+        runTransaction();
+        fakeBackend.awaitDataCaptured(5, TimeUnit.SECONDS);
+        assertFalse(String.join("\n", fakeBackend.getCapturedDataLines()).contains("X-Spam-Flag"));
     }
 
     private GreylistService mockGreylist(com.hs.mail.gateway.greylist.GreylistVerdict verdict) {

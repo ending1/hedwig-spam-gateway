@@ -3,12 +3,14 @@ package com.hs.mail.gateway.server;
 import com.hs.mail.gateway.ban.BanListService;
 import com.hs.mail.gateway.config.GatewayProperties;
 import com.hs.mail.gateway.greylist.GreylistService;
+import com.hs.mail.gateway.maillist.MailListService;
 import com.hs.mail.gateway.monitor.ConnectionStats;
 import com.hs.mail.gateway.monitor.RblStats;
 import com.hs.mail.gateway.monitor.SpamFilterStats;
 import com.hs.mail.gateway.ratelimit.SlidingWindowCounter;
 import com.hs.mail.gateway.rbl.RblCheckExecutor;
 import com.hs.mail.gateway.rbl.RblChecker;
+import com.hs.mail.gateway.spamfilter.RuleBasedSpamChecker;
 import com.hs.mail.gateway.spamfilter.SpamClassifier;
 import com.hs.mail.gateway.spamfilter.SpamClassifierExecutor;
 import com.hs.mail.gateway.spamfilter.server.InboundFilterFrontHandler;
@@ -24,12 +26,12 @@ import org.springframework.stereotype.Component;
 import java.util.concurrent.TimeUnit;
 
 /**
- * 파이프라인 순서: idle timeout -> rate-limit -> ban-check -> rbl-check -> relay(또는 스팸필터/그레이리스팅 프록시).
- * 앞단 체크가 먼저 커넥션을 끊어야 이후 단계가 불필요한 backend 커넥션을 열지 않는다.
+ * 파이프라인 순서: idle timeout -> rate-limit -> ban-check -> rbl-check -> relay(또는 스팸필터/그레이리스팅/
+ * 화이트-블랙리스트 프록시). 앞단 체크가 먼저 커넥션을 끊어야 이후 단계가 불필요한 backend 커넥션을 열지 않는다.
  *
- * <p>{@code gateway.spam-filter.enabled}와 {@code gateway.greylist.enabled}가 모두 false(기본값)면
- * 기존처럼 SMTP를 파싱하지 않는 순수 바이트 릴레이({@link RelayHandler})를 사용한다. 둘 중 하나라도
- * true면 SMTP를 종단해 DATA 본문(스팸필터)/RCPT TO(그레이리스팅)를 처리하는
+ * <p>{@code gateway.spam-filter.enabled}, {@code gateway.greylist.enabled}, {@code gateway.mail-list.enabled},
+ * {@code gateway.rule-filter.enabled}가 모두 false(기본값)면 기존처럼 SMTP를 파싱하지 않는 순수 바이트
+ * 릴레이({@link RelayHandler})를 사용한다. 하나라도 true면 SMTP를 종단하는
  * {@link InboundFilterFrontHandler}로 교체한다. RBL 체크는 두 파이프라인 모두에 공통 적용된다.</p>
  */
 @Component
@@ -46,6 +48,8 @@ public class GatewayChannelInitializer extends ChannelInitializer<SocketChannel>
     private final RblChecker rblChecker;
     private final RblStats rblStats;
     private final RblCheckExecutor rblCheckExecutor;
+    private final MailListService mailListService;
+    private final RuleBasedSpamChecker ruleBasedSpamChecker;
 
     public GatewayChannelInitializer(GatewayProperties properties,
                                       BanListService banListService,
@@ -56,7 +60,9 @@ public class GatewayChannelInitializer extends ChannelInitializer<SocketChannel>
                                       GreylistService greylistService,
                                       RblChecker rblChecker,
                                       RblStats rblStats,
-                                      RblCheckExecutor rblCheckExecutor) {
+                                      RblCheckExecutor rblCheckExecutor,
+                                      MailListService mailListService,
+                                      RuleBasedSpamChecker ruleBasedSpamChecker) {
         this.properties = properties;
         this.banListService = banListService;
         this.connectionStats = connectionStats;
@@ -67,6 +73,8 @@ public class GatewayChannelInitializer extends ChannelInitializer<SocketChannel>
         this.rblChecker = rblChecker;
         this.rblStats = rblStats;
         this.rblCheckExecutor = rblCheckExecutor;
+        this.mailListService = mailListService;
+        this.ruleBasedSpamChecker = ruleBasedSpamChecker;
         this.counter = new SlidingWindowCounter(properties.getRateLimit().getWindowSeconds());
     }
 
@@ -78,13 +86,19 @@ public class GatewayChannelInitializer extends ChannelInitializer<SocketChannel>
                 .addLast("banCheck", new BanCheckHandler(banListService))
                 .addLast("rblCheck", new RblCheckHandler(rblChecker, rblStats, rblCheckExecutor.get()));
 
-        if (properties.getSpamFilter().isEnabled() || properties.getGreylist().isEnabled()) {
+        boolean needsProxy = properties.getSpamFilter().isEnabled()
+                || properties.getGreylist().isEnabled()
+                || properties.getMailList().isEnabled()
+                || properties.getRuleFilter().isEnabled();
+
+        if (needsProxy) {
             ch.pipeline()
                     .addLast("frameDecoder", new DelimiterBasedFrameDecoder(8192, Delimiters.lineDelimiter()))
                     .addLast("stringDecoder", new StringDecoder())
                     .addLast("stringEncoder", new StringEncoder())
                     .addLast("spamFilterProxy", new InboundFilterFrontHandler(properties, spamClassifier,
-                            spamFilterStats, connectionStats, spamClassifierExecutor.get(), greylistService));
+                            spamFilterStats, connectionStats, spamClassifierExecutor.get(), greylistService,
+                            mailListService, ruleBasedSpamChecker));
         } else {
             ch.pipeline().addLast("relay", new RelayHandler(properties, connectionStats));
         }

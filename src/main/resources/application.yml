@@ -62,6 +62,14 @@ gateway:
     auth-required: false
     auth-username:
     auth-password:
+    # 이 게이트웨이를 거쳐 나가는 발신 메일에 DKIM-Signature 헤더를 추가한다 (RFC 6376, relaxed/relaxed,
+    # rsa-sha256 고정). 개인키/도메인/셀렉터를 발급받기 전까지는 enabled=false로 두면 아무 영향 없다.
+    dkim:
+      enabled: false
+      domain:
+      selector: default
+      private-key-path:
+      headers-to-sign: [From, To, Subject, Date, Message-ID]
   # 인바운드 메일의 헤더/제목/본문/수신자를 LLM으로 분석해 스팸 여부를 판정한다 (첨부파일은 범위 밖).
   # 판정 결과는 하드 거절이 아니라 X-Spam-* 헤더 태그로만 주입되며, 최종 판단은 사용자/Hedwig sieve 몫이다.
   # enabled=false(기본값)면 SMTP를 파싱하지 않는 기존 순수 바이트 릴레이가 그대로 쓰인다.
@@ -99,3 +107,18 @@ gateway:
     max-window-hours: 24
     trust-period-days: 30
     poll-interval-seconds: 10
+  # 전통적인 규칙기반(SpamAssassin류) 스팸 점수 필터. LLM보다 먼저 돌아 확실한 스팸은 LLM 호출 없이
+  # 빠르게 걸러낸다 (RCPT TO를 보진 않지만 DATA 본문을 봐야 하므로 spam-filter와 마찬가지로 프록시 필요).
+  rule-filter:
+    enabled: false
+    spam-threshold: 5.0
+    extra-keywords: []
+  # 관리자/사용자 화이트리스트-블랙리스트. 화이트는 이후 모든 스팸 체크(그레이리스팅/룰기반/LLM)를 건너뛰고,
+  # 블랙은 blacklist-action에 따라 즉시 거절(REJECT)하거나 헤더 태그만 강제한다(TAG).
+  # 관리는 /admin/mail-list REST API 또는 /admin/dashboard 페이지에서 한다.
+  mail-list:
+    enabled: false
+    blacklist-action: reject   # reject | tag
+  # /admin/* API 접근 제어. 비워두면(기본값) 인증 없이 열려있다 - 운영 배포 시 반드시 설정할 것.
+  admin:
+    api-key:

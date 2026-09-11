@@ -12,3 +12,11 @@ CREATE TABLE IF NOT EXISTS hw_greylist (
     first_seen_at TIMESTAMP NOT NULL,
     passed_at TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS hw_mail_list (
+    list_type VARCHAR(5) NOT NULL,
+    pattern VARCHAR(255) NOT NULL,
+    recipient VARCHAR(255) NOT NULL DEFAULT '',
+    reason VARCHAR(255),
+    PRIMARY KEY (list_type, pattern, recipient)
+);
