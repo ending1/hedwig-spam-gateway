@@ -525,7 +525,7 @@ public class GatewayProperties {
 
         public static class Gemini {
             private String apiKey;
-            private String model = "gemini-2.0-flash-lite";
+            private String model = "gemini-3.5-flash-lite";
 
             public String getApiKey() {
                 return apiKey;

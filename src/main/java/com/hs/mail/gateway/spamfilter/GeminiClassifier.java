@@ -8,7 +8,12 @@ import com.hs.mail.gateway.config.GatewayProperties;
 
 import java.util.Collections;
 
-/** Google Gemini API 호출 분류기 (제품 후보 - 예: gemini-2.0-flash-lite). */
+/**
+ * Google Gemini API 호출 분류기 (예: gemini-3.5-flash-lite).
+ * 실측 비교(2026-09-14, D:/slack.eml 피싱 메일)에서 Gemma 7B/Claude/ChatGPT는 정상으로 오판했으나
+ * Gemini만 본문 속 발신자 불일치(outlook.com)를 잡아내 스팸으로 정확히 판정 - 현재까지 실측 정확도가
+ * 가장 높은 제품 후보.
+ */
 public class GeminiClassifier implements SpamClassifier {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
