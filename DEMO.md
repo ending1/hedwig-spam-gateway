@@ -43,10 +43,17 @@ jackson-{annotations,core,databind}-2.13.0, 총 7개 jar)를 해석한 뒤 `/hom
 이 수정 덕분에 이 데모의 backend를 임시로 썼던 FakeHedwig(`deploy/FakeHedwig.java`, 여전히 별도
 격리 테스트용으로 유용해 저장소에는 남겨둠)에서 다시 **실 node1**으로 되돌렸다.
 
-**남은 후속 과제(선택)**: GeoLite2-Country.mmdb 데이터 파일 자체는 아직 배포되지 않아
-(`Config` 기본 경로 `/opt/hedwig/geoip/GeoLite2-Country.mmdb` 없음) `X-Sender-Country` 헤더는
-TLD 기반 fallback으로만 채워진다(크래시는 나지 않음, 코드가 이미 방어 처리). 정확한 GeoIP 판별이
-필요하면 MaxMind 계정/라이선스 키를 발급받아 mmdb 파일을 해당 경로에 배포해야 한다.
+### GeoLite2-Country.mmdb 데이터 파일 배포 (2026-09-15)
+
+위 jar 수정만으로는 크래시는 사라지지만, mmdb 데이터 파일 자체가 없어 `X-Sender-Country` 헤더는
+TLD 기반 fallback으로만 채워지는 상태였다. MaxMind 라이선스 키를 발급받아
+`https://download.maxmind.com/app/geoip_download?edition_id=GeoLite2-Country&license_key=...&suffix=tar.gz`
+에서 최신 GeoLite2-Country DB(`GeoLite2-Country_20260911.tar.gz`)를 내려받아 압축 해제 후
+`/opt/hedwig/geoip/GeoLite2-Country.mmdb`(코드 기본 경로, `sudo mkdir -p` + `chown egov:egov`)에 배포하고
+두 노드를 재기동했다(`geoIpLoadAttempted` 플래그가 JVM 생명주기 동안 캐시되므로 파일을 나중에 놓으면
+재기동해야 반영됨). MaxMind `DatabaseReader`를 직접 호출하는 별도 테스트로 `8.8.8.8 -> US` 정상 판별을
+확인했다. 라이선스 키는 저장소/설정 파일에 남기지 않았으므로, DB 갱신이 필요하면 같은 방식으로
+재다운로드해서 교체하면 된다(MaxMind는 주기적 갱신을 권장).
 
 ## 1. 서버 기동
 
