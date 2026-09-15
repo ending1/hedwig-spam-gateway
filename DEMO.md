@@ -6,27 +6,53 @@ RBL, 그레이리스팅, 룰기반 콘텐츠 필터(피싱 탐지), 화이트/�
 
 ## 0. 배포 구성
 
-- 게이트웨이 재시(SMTP): `127.0.0.1:12535`
+- 게이트웨이 리슨(SMTP): `127.0.0.1:12535`
 - 관리자/Actuator HTTP: `http://127.0.0.1:18091`
-- backend: **FakeHedwig**(`deploy/FakeHedwig.java`, DATA 본문/주입된 헤더를 그대로 콘솔에 출력) `127.0.0.1:12570`
-  - 실제 Hedwig node1(`127.0.0.1:2560`)은 데모용 수신자 계정이 실존하지 않아 DATA(354) 응답 직후
-    커넥션을 즉시 끊어버리는 것을 확인했다(게이트웨이를 거치지 않고 node1에 직접 접속해도 동일하게
-    재현됨 — 게이트웨이 버그가 아니라 node1 자체의 동작). 헤더 태깅까지 눈으로 확인해야 하는 시연
-    목적에는 부적합하므로, DATA 본문을 그대로 에코하는 FakeHedwig를 backend로 사용한다.
-    RBL/그레이리스팅은 backend 연결 이전(RBL) 또는 backend 미개입(그레이리스팅 DEFER) 단계에서
-    판정되므로 이 대체와 무관하게 그대로 유효하다.
+- backend: **실 Hedwig node1** `127.0.0.1:2560`
 - 설정 파일: `deploy/egov-demo-application.yml` → 서버의 `/home/egov/hedwig_spam/config/application.yml`
 - 데모 도구: `deploy/PhishingDemoClient.java`, `deploy/RblTestClient.java`, `deploy/BlacklistDemoClient.java`
   (모두 서버에 `javac`로 컴파일해서 사용)
 - H2 인메모리 DB를 사용하므로 **게이트웨이를 재시작하면 그레이리스팅/화이트-블랙리스트 데이터가 초기화**된다.
+
+### node1 DATA 크래시 버그 수정 (2026-09-15)
+
+최초 시연 시 실 node1으로 DATA까지 진행하면 `354` 응답 직후 커넥션이 즉시 끊기는 문제를 발견했다
+(게이트웨이 우회 직접 접속으로도 재현되어 게이트웨이 버그가 아님을 확인). `/home/egov/hedwig-node1/bin/app.console`의
+스택트레이스로 근본 원인을 특정:
+
+```
+Exception in thread "smtp.taskExecutor-51" java.lang.NoClassDefFoundError:
+    com/maxmind/geoip2/exception/AddressNotFoundException
+    at com.hs.mail.smtp.processor.DataProcessor.doProcess(DataProcessor.java:74)
+Caused by: java.lang.ClassNotFoundException: com.maxmind.geoip2.exception.AddressNotFoundException
+```
+
+`DataProcessor.doStartData()`가 `354` 응답 직후 `CountryResolverUtil.resolveByIp()`(발신 국가코드 판별,
+`X-Sender-Country` 헤더용)를 호출하는데, `hedwig-server`의 `pom.xml`에는 `com.maxmind.geoip2:geoip2:2.16.1`
+의존성이 선언되어 있지만 실제 node1/node2 배포판의 `lib/`에는 이 jar와 전이 의존성이 빠져 있었다.
+`NoClassDefFoundError`는 `Error`라서 코드의 `catch (Exception e)`에 잡히지 않고 그대로 전파되어
+DATA 처리 스레드가 죽으면서 클라이언트에 응답 없이 커넥션만 끊긴 것.
+
+**조치**: 임시 pom으로 `mvn dependency:copy-dependencies`를 이용해 `geoip2` 런타임 의존성 전체
+(geoip2-2.16.1, maxmind-db-2.0.0, httpclient-4.5.13, httpcore-4.4.13,
+jackson-{annotations,core,databind}-2.13.0, 총 7개 jar)를 해석한 뒤 `/home/egov/hedwig-node1/lib/`와
+`/home/egov/hedwig-node2/lib/`에 배포(두 노드의 `run.sh`가 `../lib/*.jar`를 자동으로 classpath에 포함하므로
+스크립트 수정 불필요), `bin/run.sh restart`로 재기동. 재기동 후 두 노드 모두 직접 DATA 트랜잭션으로
+`250 2.6.0 OK` 정상 응답 확인, `app.console`에 더 이상 관련 예외가 발생하지 않음을 확인했다.
+
+이 수정 덕분에 이 데모의 backend를 임시로 썼던 FakeHedwig(`deploy/FakeHedwig.java`, 여전히 별도
+격리 테스트용으로 유용해 저장소에는 남겨둠)에서 다시 **실 node1**으로 되돌렸다.
+
+**남은 후속 과제(선택)**: GeoLite2-Country.mmdb 데이터 파일 자체는 아직 배포되지 않아
+(`Config` 기본 경로 `/opt/hedwig/geoip/GeoLite2-Country.mmdb` 없음) `X-Sender-Country` 헤더는
+TLD 기반 fallback으로만 채워진다(크래시는 나지 않음, 코드가 이미 방어 처리). 정확한 GeoIP 판별이
+필요하면 MaxMind 계정/라이선스 키를 발급받아 mmdb 파일을 해당 경로에 배포해야 한다.
 
 ## 1. 서버 기동
 
 ```bash
 ssh egov
 cd /home/egov/hedwig_spam
-nohup java FakeHedwig 12570 > logs/fake-hedwig.log 2>&1 < /dev/null &
-disown
 nohup java -Xms256m -Xmx512m -jar hedwig-spam-gateway.jar \
   --spring.config.location=config/application.yml > logs/gateway.log 2>&1 < /dev/null &
 disown
@@ -35,7 +61,7 @@ disown
 `logs/gateway.log`에서 다음 라인으로 정상 기동을 확인한다.
 
 ```
-SpamGatewayServer - 스팸 게이트웨이(gateway-demo) 리슨 시작: port=12535, reusePort=false, backend=127.0.0.1:12570
+SpamGatewayServer - 스팸 게이트웨이(gateway-demo) 리슨 시작: port=12535, reusePort=false, backend=127.0.0.1:2560
 ```
 
 ## 2. RBL(DNSBL) 차단/통과
@@ -49,7 +75,7 @@ java RblTestClient 12535 127.0.0.1   # 정상 통과 확인용
 
 **결과**
 - `127.0.0.2` → `connection closed immediately (no banner)` — RBL 등재 IP, 배너 전송 전 즉시 연결 종료
-- `127.0.0.1` → `220 fake-hedwig.local ESMTP ready` — 정상 통과, backend 배너까지 중계됨
+- `127.0.0.1` → `220 egov.handysoft.co.kr Service ready` — 정상 통과, backend 배너까지 중계됨
 
 `logs/gateway.log`:
 ```
@@ -76,9 +102,9 @@ RCPT TO << 450 4.2.1 Please try again later
 
 **2차 결과(65초 후)**
 ```
-RCPT TO << 250 2.1.5 OK
+RCPT TO << 250 2.1.5 Recipient <demo-target@handysoft.co.kr> OK
 DATA << 354 Start mail input; end with <CRLF>.<CRLF>
-FINAL << 250 2.6.0 Queued
+FINAL << 250 2.6.0 OK
 ```
 
 ## 4. 룰기반 피싱 탐지 + 헤더 태깅 (실측 사례 재현)
@@ -88,8 +114,18 @@ FINAL << 250 2.6.0 Queued
 이 신호(`embedded-email-domain-mismatch`)는 실측 비교에서 Gemini만 잡아냈던 패턴을 규칙으로
 재구현한 것으로, 단독으로 스팸 임계치를 넘도록 가중치가 설정되어 있다(`RuleBasedSpamChecker`).
 
-2차 시도(그레이리스팅 통과 후) 결과, `logs/fake-hedwig.log`에 다음과 같이 게이트웨이가 주입한
-헤더가 DATA 본문 맨 앞에 붙어 backend로 전달된 것을 확인:
+2차 시도(그레이리스팅 통과 후) `logs/gateway.log`:
+```
+InboundFilterFrontHandler - 스팸 판정: score=0.5, reason=embedded-email-domain-mismatch:outlook.com
+```
+
+실 node1이 `250 2.6.0 OK`로 정상 수신 처리했으므로, `X-Spam-Flag`/`X-Spam-Score`/`X-Spam-Provider`
+헤더가 주입된 메일이 실제로 backend에 전달·저장된 것이다. 룰기반 필터가 이미 확신하는 스팸이므로
+LLM 호출 없이(비용 절감) 즉시 태깅해 전달했다.
+
+주입된 헤더가 DATA 본문에 정확히 어떤 순서/형태로 붙는지 콘솔에서 직접 눈으로 확인하고 싶다면,
+`deploy/FakeHedwig.java`(DATA 본문을 그대로 표준출력에 에코)를 backend로 임시 사용해도 된다
+(`gateway.backend.port`를 FakeHedwig 포트로 바꾸고 재시작). 실측 결과는 다음과 같았다:
 
 ```
 ---- DATA CONTENT ----
@@ -103,13 +139,6 @@ DATA|
 DATA| 문의사항은 NadineEmerie6061@outlook.com 으로 연락 주세요.
 ---- END DATA ----
 ```
-
-`logs/gateway.log`:
-```
-InboundFilterFrontHandler - 스팸 판정: score=0.5, reason=embedded-email-domain-mismatch:outlook.com
-```
-
-룰기반 필터가 이미 확신하는 스팸이므로 LLM 호출 없이(비용 절감) 즉시 태깅해 전달했다.
 
 ## 5. 화이트/블랙리스트 REST API + 블랙리스트 REJECT
 
@@ -158,8 +187,4 @@ RBL 차단 수, 그레이리스팅 DEFER/ALLOW 수, 스팸/정상 판정 수 등
 | 화이트/블랙리스트 REST API | 등록/조회 정상 |
 | 관리자 대시보드 | HTTP 200, HTML 정상 렌더링 |
 
-## 알려진 이슈(게이트웨이 범위 밖)
-
-실제 Hedwig node1(`127.0.0.1:2560`)에 존재하지 않는 수신자로 DATA까지 진행하면, 게이트웨이를
-거치지 않고 node1에 직접 접속해도 `354` 응답 직후 커넥션이 끊긴다. 게이트웨이 버그가 아니라
-node1 자체의 동작이므로, 실계정 기준으로 재현/조사가 필요하면 별도 조사 필요.
+시연 과정에서 발견해 수정한 node1/node2 배포 결함은 "0. 배포 구성 > node1 DATA 크래시 버그 수정" 절 참고.

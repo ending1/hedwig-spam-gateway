@@ -23,8 +23,9 @@ gateway:
   db-dialect: ansi
   backend:
     host: 127.0.0.1
-    port: 12570   # 시연용 FakeHedwig(DATA 본문/헤더 태깅을 콘솔에 그대로 출력) - 실 node1(2560)은
-                  # 데모 계정 부재로 DATA 단계에서 즉시 커넥션을 끊어 시연에 부적합해 대체
+    port: 2560   # 실 Hedwig node1. node1의 CountryResolverUtil(GeoIP) 관련 NoClassDefFoundError로
+                 # DATA 단계에서 커넥션이 끊기던 배포 결함을 수정(geoip2 등 런타임 jar 배포)한 뒤
+                 # 실 backend로 복귀시킴.
   rate-limit:
     window-seconds: 10
     threshold: 100
