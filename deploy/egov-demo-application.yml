@@ -1,0 +1,74 @@
+# 라이선스 판매용 상용 제품 본연의 스코프 - 단일 backend(node1), 부가기능 데모/검증용 설정.
+# failover는 hedwig-smtp-frontend가 별도로 담당한다.
+server:
+  port: 18091
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: gateway,health
+
+spring:
+  datasource:
+    url: jdbc:h2:mem:gateway;MODE=MySQL;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+gateway:
+  instance-id: gateway-demo
+  listen-port: 12535
+  reuse-port: false
+  db-dialect: ansi
+  backend:
+    host: 127.0.0.1
+    port: 12570   # 시연용 FakeHedwig(DATA 본문/헤더 태깅을 콘솔에 그대로 출력) - 실 node1(2560)은
+                  # 데모 계정 부재로 DATA 단계에서 즉시 커넥션을 끊어 시연에 부적합해 대체
+  rate-limit:
+    window-seconds: 10
+    threshold: 100
+  ban:
+    default-duration-minutes: 60
+    poll-interval-seconds: 5
+  failover:
+    policy: fail-open
+  os-block:
+    enabled: false
+  outbound:
+    enabled: true
+    bind-host: 0.0.0.0
+    listen-port: 12536
+    reuse-port: false
+    spool-dir: /home/egov/hedwig_spam/spool/outbound
+    max-retries: 5
+    retry-delay-seconds: 120
+    delay-after-retries: 2
+    worker-pool-size: 5
+    worker-max-pool-size: 10
+    delay-worker-pool-size: 2
+    delay-worker-max-pool-size: 4
+    dns-timeout-millis: 5000
+    smtp-connect-timeout-millis: 5000
+    smtp-timeout-millis: 5000
+    auth-required: false
+  # --- 아래부터 시연용으로 활성화 ---
+  rbl:
+    enabled: true
+    zones:
+      - zen.spamhaus.org
+      - bl.spamcop.net
+    timeout-millis: 3000
+  greylist:
+    enabled: true
+    min-retry-delay-minutes: 1   # 시연용으로 5분 대신 1분
+    max-window-hours: 24
+    trust-period-days: 30
+  rule-filter:
+    enabled: true
+    spam-threshold: 5.0
+  mail-list:
+    enabled: true
+    blacklist-action: reject
+  admin:
+    api-key:   # 시연 편의상 인증 없음 (실운영 배포 시 반드시 설정)
