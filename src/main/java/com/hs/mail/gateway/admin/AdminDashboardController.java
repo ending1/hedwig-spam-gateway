@@ -54,6 +54,27 @@ public class AdminDashboardController {
                 "    <tbody></tbody>\n" +
                 "  </table>\n" +
                 "</section>\n" +
+                "<section>\n" +
+                "  <h2>룰기반 스팸 필터 - 룰 관리</h2>\n" +
+                "  <p style=\"color:#666;font-size:0.85rem;margin-top:-0.5rem\">키워드(정규식)/브랜드 사칭/프리메일 도메인/URL 단축서비스/구조체크 가중치를 재빌드 없이 여기서 바로 추가·수정·삭제합니다.</p>\n" +
+                "  <form id=\"ruleAddForm\">\n" +
+                "    <select id=\"ruleType\">\n" +
+                "      <option value=\"KEYWORD\">KEYWORD(정규식)</option>\n" +
+                "      <option value=\"BRAND\">BRAND(브랜드명)</option>\n" +
+                "      <option value=\"FREE_MAIL_DOMAIN\">FREE_MAIL_DOMAIN(도메인)</option>\n" +
+                "      <option value=\"URL_SHORTENER\">URL_SHORTENER(도메인)</option>\n" +
+                "      <option value=\"STRUCTURAL\">STRUCTURAL(식별자)</option>\n" +
+                "    </select>\n" +
+                "    <input id=\"rulePattern\" placeholder=\"패턴/도메인/브랜드명/식별자\" size=\"28\" required>\n" +
+                "    <input id=\"ruleWeight\" type=\"number\" step=\"0.5\" placeholder=\"가중치\" value=\"2.0\" size=\"6\">\n" +
+                "    <input id=\"ruleReason\" placeholder=\"설명(선택)\" size=\"20\">\n" +
+                "    <button type=\"submit\">추가</button>\n" +
+                "  </form>\n" +
+                "  <table id=\"ruleTable\">\n" +
+                "    <thead><tr><th>ID</th><th>유형</th><th>패턴</th><th>가중치</th><th>상태</th><th>설명</th><th></th></tr></thead>\n" +
+                "    <tbody></tbody>\n" +
+                "  </table>\n" +
+                "</section>\n" +
                 "<script>\n" +
                 "async function loadStats() {\n" +
                 "  const res = await fetch('/actuator/gateway');\n" +
@@ -103,7 +124,48 @@ public class AdminDashboardController {
                 "  document.getElementById('reason').value = '';\n" +
                 "  loadList();\n" +
                 "});\n" +
-                "loadStats(); loadList();\n" +
+                "async function loadRules() {\n" +
+                "  const res = await fetch('/admin/spam-rules');\n" +
+                "  const rows = await res.json();\n" +
+                "  const tbody = document.querySelector('#ruleTable tbody');\n" +
+                "  tbody.innerHTML = rows.map(r => `<tr>\n" +
+                "    <td>${r.id}</td><td>${r.ruleType}</td><td>${escapeHtml(r.pattern)}</td><td>${r.weight}</td>\n" +
+                "    <td>${r.enabled ? '활성' : '비활성'}</td><td>${r.reason || ''}</td>\n" +
+                "    <td>\n" +
+                "      <button onclick=\"toggleRule(${r.id}, '${r.ruleType}', '${encodeAttr(r.pattern)}', ${r.weight}, ${!r.enabled}, '${encodeAttr(r.reason || '')}')\">${r.enabled ? '비활성화' : '활성화'}</button>\n" +
+                "      <button class=\"danger\" onclick=\"removeRule(${r.id})\">삭제</button>\n" +
+                "    </td>\n" +
+                "  </tr>`).join('');\n" +
+                "}\n" +
+                "function escapeHtml(s) { const d = document.createElement('div'); d.innerText = s == null ? '' : s; return d.innerHTML; }\n" +
+                "function encodeAttr(s) { return (s == null ? '' : s).replace(/'/g, \"\\\\'\"); }\n" +
+                "async function toggleRule(id, ruleType, pattern, weight, enabled, reason) {\n" +
+                "  await fetch(`/admin/spam-rules/${id}`, {\n" +
+                "    method: 'PUT', headers: { 'Content-Type': 'application/json' },\n" +
+                "    body: JSON.stringify({ ruleType, pattern, weight, enabled, reason })\n" +
+                "  });\n" +
+                "  loadRules();\n" +
+                "}\n" +
+                "async function removeRule(id) {\n" +
+                "  await fetch(`/admin/spam-rules/${id}`, { method: 'DELETE' });\n" +
+                "  loadRules();\n" +
+                "}\n" +
+                "document.getElementById('ruleAddForm').addEventListener('submit', async (e) => {\n" +
+                "  e.preventDefault();\n" +
+                "  await fetch('/admin/spam-rules', {\n" +
+                "    method: 'POST', headers: { 'Content-Type': 'application/json' },\n" +
+                "    body: JSON.stringify({\n" +
+                "      ruleType: document.getElementById('ruleType').value,\n" +
+                "      pattern: document.getElementById('rulePattern').value,\n" +
+                "      weight: parseFloat(document.getElementById('ruleWeight').value || '1.0'),\n" +
+                "      reason: document.getElementById('ruleReason').value\n" +
+                "    })\n" +
+                "  });\n" +
+                "  document.getElementById('rulePattern').value = '';\n" +
+                "  document.getElementById('ruleReason').value = '';\n" +
+                "  loadRules();\n" +
+                "});\n" +
+                "loadStats(); loadList(); loadRules();\n" +
                 "setInterval(loadStats, 5000);\n" +
                 "</script>\n" +
                 "</body>\n" +
