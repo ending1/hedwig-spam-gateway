@@ -1,0 +1,74 @@
+# hedwig-node2(127.0.0.1:2561) 전용 게이트웨이 인스턴스 설정.
+# node1용 인스턴스(conf/application.yml, listen 12535/12536, actuator 18091)와 포트가 겹치지
+# 않도록 전부 시프트했다. 같은 호스트에서 두 인스턴스를 동시에 띄우는 구성이므로
+# GATEWAY_PNAME=HEDWIG_SPAM_GATEWAY_NODE2 로 start.sh/stop.sh를 실행해야 한다.
+server:
+  port: 18092
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: gateway,health
+
+spring:
+  datasource:
+    url: jdbc:h2:mem:gateway-node2;MODE=MySQL;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+
+gateway:
+  instance-id: gateway-node2-demo
+  listen-port: 12545
+  reuse-port: false
+  db-dialect: ansi
+  backend:
+    host: 127.0.0.1
+    port: 2561   # 실 Hedwig node2
+  rate-limit:
+    window-seconds: 10
+    threshold: 100
+  ban:
+    default-duration-minutes: 60
+    poll-interval-seconds: 5
+  failover:
+    policy: fail-open
+  os-block:
+    enabled: false
+  outbound:
+    enabled: true
+    bind-host: 0.0.0.0
+    listen-port: 12546
+    reuse-port: false
+    spool-dir: /home/egov/hedwig_spam_node2/spool/outbound
+    max-retries: 5
+    retry-delay-seconds: 120
+    delay-after-retries: 2
+    worker-pool-size: 5
+    worker-max-pool-size: 10
+    delay-worker-pool-size: 2
+    delay-worker-max-pool-size: 4
+    dns-timeout-millis: 5000
+    smtp-connect-timeout-millis: 5000
+    smtp-timeout-millis: 5000
+    auth-required: false
+  rbl:
+    enabled: true
+    zones:
+      - zen.spamhaus.org
+      - bl.spamcop.net
+    timeout-millis: 3000
+  greylist:
+    enabled: true
+    min-retry-delay-minutes: 1   # 시연용으로 5분 대신 1분
+    max-window-hours: 24
+    trust-period-days: 30
+  rule-filter:
+    enabled: true
+    spam-threshold: 5.0
+  mail-list:
+    enabled: true
+    blacklist-action: reject
+  admin:
+    api-key:   # 시연 편의상 인증 없음 (실운영 배포 시 반드시 설정)

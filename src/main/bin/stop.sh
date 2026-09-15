@@ -1,8 +1,9 @@
 #!/bin/sh
 # start.sh가 -D<PNAME>로 표시해 둔 프로세스를 찾아 정상 종료 후, 남아있으면 강제 종료한다.
 # (Hedwig assembly/src/release/bin/run.sh stop과 동일한 방식)
+# 여러 인스턴스를 띄운 경우 start.sh와 동일한 GATEWAY_PNAME을 지정해야 한다.
 
-PNAME="HEDWIG_SPAM_GATEWAY"
+PNAME="${GATEWAY_PNAME:-HEDWIG_SPAM_GATEWAY}"
 
 pid=`ps -eaf | grep "$PNAME" | grep -v grep | awk '{print $2}'`
 if [ -z "$pid" ]; then
