@@ -9,7 +9,9 @@ RBL, 그레이리스팅, 룰기반 콘텐츠 필터(피싱 탐지), 화이트/�
 - 게이트웨이 리슨(SMTP): `127.0.0.1:12535`
 - 관리자/Actuator HTTP: `http://127.0.0.1:18091`
 - backend: **실 Hedwig node1** `127.0.0.1:2560`
-- 설정 파일: `deploy/egov-demo-application.yml` → 서버의 `/home/egov/hedwig_spam/config/application.yml`
+- 설정 파일: `deploy/conf/application.yml`(원본은 `deploy/egov-demo-application.yml`) → 서버의 `/home/egov/hedwig_spam/conf/application.yml`
+- 로그 설정: `src/main/conf/log4j2.xml` → 서버의 `/home/egov/hedwig_spam/conf/log4j2.xml`
+- 시작/종료: `src/main/bin/start.sh`, `src/main/bin/stop.sh` → 서버의 `/home/egov/hedwig_spam/bin/`
 - 데모 도구: `deploy/PhishingDemoClient.java`, `deploy/RblTestClient.java`, `deploy/BlacklistDemoClient.java`
   (모두 서버에 `javac`로 컴파일해서 사용)
 - H2 인메모리 DB를 사용하므로 **게이트웨이를 재시작하면 그레이리스팅/화이트-블랙리스트 데이터가 초기화**된다.
@@ -57,19 +59,27 @@ TLD 기반 fallback으로만 채워지는 상태였다. MaxMind 라이선스 키
 
 ## 1. 서버 기동
 
+배포 레이아웃은 Hedwig(`hedwig-node1/{bin,conf,lib,logs}`)과 동일하게
+`bin/`(start.sh·stop.sh), `conf/`(application.yml·log4j2.xml), `logs/`(로그 파일)로 구성했다.
+
 ```bash
 ssh egov
 cd /home/egov/hedwig_spam
-nohup java -Xms256m -Xmx512m -jar hedwig-spam-gateway.jar \
-  --spring.config.location=config/application.yml > logs/gateway.log 2>&1 < /dev/null &
-disown
+JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 ./bin/start.sh
 ```
 
-`logs/gateway.log`에서 다음 라인으로 정상 기동을 확인한다.
+`logs/gateway.console`(또는 `logs/general.log`)에서 다음 라인으로 정상 기동을 확인한다.
 
 ```
 SpamGatewayServer - 스팸 게이트웨이(gateway-demo) 리슨 시작: port=12535, reusePort=false, backend=127.0.0.1:2560
 ```
+
+종료는 `./bin/stop.sh` — Hedwig `run.sh`와 동일하게 `-DHEDWIG_SPAM_GATEWAY` 프로세스를 `ps -eaf`로 찾아
+정상 종료 후 필요 시 강제 종료한다(pid 파일 없음). 이미 실행 중이면 `start.sh`가
+`is already running (pid=...)`을 출력하고 종료한다.
+
+로그 파일/레벨은 `conf/log4j2.xml`을 직접 수정하면 재빌드 없이 반영된다(재시작 필요). Hedwig처럼
+패키지별로 파일을 분리했다: `logs/{general,server,spamfilter,rbl,greylist,maillist,ban,outbound,jdbc}.log`.
 
 ## 2. RBL(DNSBL) 차단/통과
 
@@ -84,7 +94,7 @@ java RblTestClient 12535 127.0.0.1   # 정상 통과 확인용
 - `127.0.0.2` → `connection closed immediately (no banner)` — RBL 등재 IP, 배너 전송 전 즉시 연결 종료
 - `127.0.0.1` → `220 egov.handysoft.co.kr Service ready` — 정상 통과, backend 배너까지 중계됨
 
-`logs/gateway.log`:
+`logs/rbl.log`:
 ```
 RblChecker - RBL 차단: ip=127.0.0.2, zone=zen.spamhaus.org
 RblCheckHandler - RBL 등재 IP 연결 즉시 종료: ip=127.0.0.2
@@ -105,7 +115,11 @@ java PhishingDemoClient 12535   # 2차: RCPT TO 250, DATA까지 정상 진행
 ```
 RCPT TO << 450 4.2.1 Please try again later
 ```
-`logs/gateway.log`: `그레이리스팅 DEFER: ip=127.0.0.1, from=no-reply@slack.com, to=demo-target@handysoft.co.kr`
+`logs/spamfilter.log`: `그레이리스팅 DEFER: ip=127.0.0.1, from=no-reply@slack.com, to=demo-target@handysoft.co.kr`
+(그레이리스팅/화이트-블랙리스트/스팸 판정 로직이 모두 `InboundFilterFrontHandler` 한 클래스 —
+패키지 `com.hs.mail.gateway.spamfilter.server` — 에서 처리되므로, `conf/log4j2.xml`의
+`greylist.log`/`maillist.log`는 이 판정 로그를 받지 못하고 `spamfilter.log`로 모인다. 별도 파일로
+분리하려면 로그 지점을 각 서비스 클래스로 옮기는 코드 변경이 필요하다.)
 
 **2차 결과(65초 후)**
 ```
@@ -121,7 +135,7 @@ FINAL << 250 2.6.0 OK
 이 신호(`embedded-email-domain-mismatch`)는 실측 비교에서 Gemini만 잡아냈던 패턴을 규칙으로
 재구현한 것으로, 단독으로 스팸 임계치를 넘도록 가중치가 설정되어 있다(`RuleBasedSpamChecker`).
 
-2차 시도(그레이리스팅 통과 후) `logs/gateway.log`:
+2차 시도(그레이리스팅 통과 후) `logs/spamfilter.log`:
 ```
 InboundFilterFrontHandler - 스팸 판정: score=0.5, reason=embedded-email-domain-mismatch:outlook.com
 ```

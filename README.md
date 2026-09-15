@@ -89,7 +89,28 @@ Java 8 호환 바이트코드로 빌드되지만, 개발 편의를 위해 JDK 17
 java -jar target/hedwig-spam-gateway.jar
 ```
 
-기본 설정(`src/main/resources/application.yml`)은 인바운드 2525, 아웃바운드 2526, Actuator 8090 포트를 사용하며 스팸필터/RBL/그레이리스팅은 모두 기본 비활성입니다. 운영 배포 시에는 `src/main/bin/run.sh`(Hedwig `run.sh`와 동일한 인터페이스), `hedwig-gateway.service`(systemd), `aix-srsetup.sh`(AIX SRC) 예시를 참고하세요.
+기본 설정(`src/main/resources/application.yml`)은 인바운드 2525, 아웃바운드 2526, Actuator 8090 포트를 사용하며 스팸필터/RBL/그레이리스팅은 모두 기본 비활성입니다. 운영 배포 시에는 `src/main/bin/start.sh`/`stop.sh`(Hedwig `run.sh`와 동일한 프로세스 식별 방식을 시작/종료로 분리), `hedwig-gateway.service`(systemd), `aix-srsetup.sh`(AIX SRC) 예시를 참고하세요.
+
+배포 레이아웃은 Hedwig(`{bin,conf,lib,logs}`)과 동일하게 `<GW_HOME>/{bin,conf,logs}` + 루트의 jar로 구성합니다.
+
+```
+<GW_HOME>/
+  hedwig-spam-gateway.jar
+  bin/
+    start.sh
+    stop.sh
+  conf/
+    application.yml
+    log4j2.xml       # 선택 - 없으면 jar 내장 기본 로그 설정 사용
+  logs/
+```
+
+```bash
+JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 bin/start.sh
+bin/stop.sh
+```
+
+`conf/log4j2.xml`을 두면(`src/main/conf/log4j2.xml`을 복사해 시작점으로 사용) Hedwig의 `conf/log4j2.xml`과 동일한 방식으로 jar 재빌드 없이 로그 파일 위치/롤링(10MB, 10개 보관)/레벨을 바꿀 수 있습니다. 기본 제공 설정은 Hedwig처럼 기능별로 로그를 분리합니다: `logs/{general,server,spamfilter,rbl,greylist,maillist,ban,outbound,jdbc}.log`. (스팸 판정은 RCPT/DATA를 처리하는 인바운드 프록시 핸들러가 그레이리스팅·화이트/블랙리스트 판정까지 함께 수행하므로 `spamfilter.log`에 모입니다.) 파일을 두지 않으면 jar에 내장된 기본 설정(콘솔 + `logs/gateway.log` 단일 파일)이 사용됩니다.
 
 ### 주요 설정 (`application.yml`)
 

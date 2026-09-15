@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Hedwig(conf/log4j2.xml)과 동일한 방식의 외부 로그 설정 파일. 이 파일을 배포 시
+    <GW_HOME>/conf/log4j2.xml 에 두고 start.sh/systemd/AIX SRC 기동 옵션에
+    -Dlog4j.configurationFile=file:<GW_HOME>/conf/log4j2.xml 을 지정하면, jar 재빌드 없이
+    로그 파일 위치/롤링/레벨을 바꿀 수 있다. 여기서 쓰는 상대 경로(../logs/...)는 <GW_HOME>에서
+    기동하는 것을 기준으로 한다(= conf/의 부모 디렉터리). 사이즈 기반 롤링 컨벤션(10MB, 10개 보관)은
+    Hedwig assembly/src/release/conf/log4j2.xml과 동일하다.
+
+    이 파일을 쓰지 않고(-D 옵션 생략) 기동하면 jar에 내장된 기본 설정
+    (src/main/resources/log4j2.xml, 콘솔 + logs/gateway.log 단일 파일)이 사용된다.
+-->
+<Configuration status="WARN">
+    <Appenders>
+        <Console name="CONSOLE" target="SYSTEM_OUT">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss,SSS} [%t] %-5p %c{1} - %m%n"/>
+        </Console>
+
+        <!-- 전체 게이트웨이 공통 로그 (하위 패키지 개별 지정분 제외) -->
+        <RollingFile name="GENERAL_LOG" fileName="../logs/general.log" filePattern="../logs/general.log.%i">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss,SSS} [%t] %-5p %c{1} - %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="10MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10" fileIndex="min"/>
+        </RollingFile>
+
+        <!-- 인바운드 리스너/릴레이/RBL 체크 핸들러 등 최상위 server 패키지 -->
+        <RollingFile name="SERVER_LOG" fileName="../logs/server.log" filePattern="../logs/server.log.%i">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss,SSS} [%t] %-5p %c{1} - %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="10MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10" fileIndex="min"/>
+        </RollingFile>
+
+        <!-- 스팸 판정: 인바운드 프록시(RCPT/DATA 처리, 그레이리스팅/화이트-블랙리스트 판정 포함)와
+             룰기반/LLM 분류기가 모두 여기 모인다 (spamfilter 및 spamfilter.server 패키지) -->
+        <RollingFile name="SPAMFILTER_LOG" fileName="../logs/spamfilter.log" filePattern="../logs/spamfilter.log.%i">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss,SSS} [%t] %-5p %c{1} - %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="10MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10" fileIndex="min"/>
+        </RollingFile>
+
+        <!-- RBL(DNSBL) 조회 -->
+        <RollingFile name="RBL_LOG" fileName="../logs/rbl.log" filePattern="../logs/rbl.log.%i">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss,SSS} [%t] %-5p %c{1} - %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="10MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10" fileIndex="min"/>
+        </RollingFile>
+
+        <!-- 그레이리스팅 서비스/DAO (DB 동기화 등) -->
+        <RollingFile name="GREYLIST_LOG" fileName="../logs/greylist.log" filePattern="../logs/greylist.log.%i">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss,SSS} [%t] %-5p %c{1} - %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="10MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10" fileIndex="min"/>
+        </RollingFile>
+
+        <!-- 화이트/블랙리스트 서비스/DAO -->
+        <RollingFile name="MAILLIST_LOG" fileName="../logs/maillist.log" filePattern="../logs/maillist.log.%i">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss,SSS} [%t] %-5p %c{1} - %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="10MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10" fileIndex="min"/>
+        </RollingFile>
+
+        <!-- 인바운드 밴 목록/레이트리밋 -->
+        <RollingFile name="BAN_LOG" fileName="../logs/ban.log" filePattern="../logs/ban.log.%i">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss,SSS} [%t] %-5p %c{1} - %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="10MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10" fileIndex="min"/>
+        </RollingFile>
+
+        <!-- 아웃바운드 발송 완충(스풀/재시도/DKIM) -->
+        <RollingFile name="OUTBOUND_LOG" fileName="../logs/outbound.log" filePattern="../logs/outbound.log.%i">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss,SSS} [%t] %-5p %c{1} - %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="10MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10" fileIndex="min"/>
+        </RollingFile>
+
+        <!-- DB(JdbcTemplate) 쿼리 로그 -->
+        <RollingFile name="JDBC_LOG" fileName="../logs/jdbc.log" filePattern="../logs/jdbc.log.%i">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss,SSS} [%t] %-5p %c{1} - %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="10MB"/>
+            </Policies>
+            <DefaultRolloverStrategy max="10" fileIndex="min"/>
+        </RollingFile>
+    </Appenders>
+
+    <Loggers>
+        <Logger name="com.hs.mail.gateway.spamfilter" level="INFO" additivity="false">
+            <AppenderRef ref="SPAMFILTER_LOG"/>
+            <AppenderRef ref="CONSOLE"/>
+        </Logger>
+        <Logger name="com.hs.mail.gateway.server" level="INFO" additivity="false">
+            <AppenderRef ref="SERVER_LOG"/>
+            <AppenderRef ref="CONSOLE"/>
+        </Logger>
+        <Logger name="com.hs.mail.gateway.rbl" level="INFO" additivity="false">
+            <AppenderRef ref="RBL_LOG"/>
+            <AppenderRef ref="CONSOLE"/>
+        </Logger>
+        <Logger name="com.hs.mail.gateway.greylist" level="INFO" additivity="false">
+            <AppenderRef ref="GREYLIST_LOG"/>
+            <AppenderRef ref="CONSOLE"/>
+        </Logger>
+        <Logger name="com.hs.mail.gateway.maillist" level="INFO" additivity="false">
+            <AppenderRef ref="MAILLIST_LOG"/>
+            <AppenderRef ref="CONSOLE"/>
+        </Logger>
+        <Logger name="com.hs.mail.gateway.ban" level="INFO" additivity="false">
+            <AppenderRef ref="BAN_LOG"/>
+            <AppenderRef ref="CONSOLE"/>
+        </Logger>
+        <Logger name="com.hs.mail.gateway.ratelimit" level="INFO" additivity="false">
+            <AppenderRef ref="BAN_LOG"/>
+            <AppenderRef ref="CONSOLE"/>
+        </Logger>
+        <Logger name="com.hs.mail.gateway.outbound" level="INFO" additivity="false">
+            <AppenderRef ref="OUTBOUND_LOG"/>
+            <AppenderRef ref="CONSOLE"/>
+        </Logger>
+        <Logger name="com.hs.mail.gateway" level="INFO" additivity="false">
+            <AppenderRef ref="GENERAL_LOG"/>
+            <AppenderRef ref="CONSOLE"/>
+        </Logger>
+        <Logger name="org.springframework.jdbc" level="WARN" additivity="false">
+            <AppenderRef ref="JDBC_LOG"/>
+        </Logger>
+
+        <Root level="WARN">
+            <AppenderRef ref="CONSOLE"/>
+            <AppenderRef ref="GENERAL_LOG"/>
+        </Root>
+    </Loggers>
+</Configuration>

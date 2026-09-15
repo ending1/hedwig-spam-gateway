@@ -7,8 +7,9 @@
 GW_HOME="${1:-/opt/hedwig-gateway}"
 JAVA_HOME="${JAVA_HOME:?JAVA_HOME must be set}"
 
+# conf/log4j2.xml이 있으면 재빌드 없이 로그 파일 위치/롤링/레벨을 바꿀 수 있다(Hedwig conf/log4j2.xml과 동일 방식).
 mkssys -s hedwig_gateway \
-    -p "$JAVA_HOME/bin/java -Xms256m -Xmx512m -jar $GW_HOME/hedwig-spam-gateway.jar --spring.config.location=$GW_HOME/conf/application.yml" \
+    -p "$JAVA_HOME/bin/java -Xms256m -Xmx512m -Dlog4j.configurationFile=file:$GW_HOME/conf/log4j2.xml -jar $GW_HOME/hedwig-spam-gateway.jar --spring.config.location=$GW_HOME/conf/application.yml" \
     -u 0 \
     -S -n 15 -f 9 \
     -R \

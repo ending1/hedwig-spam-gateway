@@ -10,7 +10,8 @@ After=network.target
 Type=simple
 User=hedwig
 WorkingDirectory=/opt/hedwig-gateway
-ExecStart=/usr/bin/java -Xms256m -Xmx512m -jar /opt/hedwig-gateway/hedwig-spam-gateway.jar --spring.config.location=/opt/hedwig-gateway/conf/application.yml
+# conf/log4j2.xml이 있으면 재빌드 없이 로그 파일 위치/롤링/레벨을 바꿀 수 있다(Hedwig conf/log4j2.xml과 동일 방식).
+ExecStart=/usr/bin/java -Xms256m -Xmx512m -Dlog4j.configurationFile=file:/opt/hedwig-gateway/conf/log4j2.xml -jar /opt/hedwig-gateway/hedwig-spam-gateway.jar --spring.config.location=/opt/hedwig-gateway/conf/application.yml
 Restart=always
 RestartSec=5
 
