@@ -50,6 +50,32 @@
 - LLM보다 먼저 실행되어, 이미 확신하는 스팸이면 느리고 비용이 드는 LLM 호출 자체를 건너뜀
 - **범위 밖(후속 과제)**: SPF/DKIM/DMARC 검증은 DNS 조회+암호 검증이 필요해 `RblChecker`급 별도 컴포넌트가 필요하므로 미포함
 
+**모든 룰(키워드/브랜드/프리메일 도메인/URL 단축서비스/구조체크 가중치)은 DB(`hw_spam_rule`)로
+완전 외부화**돼 있어 재빌드·재배포 없이 `/admin/spam-rules` REST API로 추가/수정/비활성화할 수 있다
+(`/admin/mail-list`와 동일하게 `X-Admin-Key` 헤더로 접근 제어). H2(개발용)는 재시작 시마다
+`schema.sql`의 기본 룰셋으로 재시딩되고, 실제 운영 DB(오라클/마리아DB/MSSQL)는
+`src/main/sql/hw_spam_rule-seed-data.sql`을 테이블 생성 후 1회 적용해 같은 기본값으로 시작할 수
+있다. 정규식(KEYWORD)은 등록 시 컴파일 검증을 거치고, 캐시 갱신 시점에도 실패한 행은 로그만 남기고
+건너뛰어 잘못된 정규식 하나가 전체 필터를 멈추지 않는다.
+
+```bash
+# 목록 조회
+curl http://localhost:8090/admin/spam-rules
+
+# 키워드 룰 추가
+curl -X POST http://localhost:8090/admin/spam-rules \
+  -H 'Content-Type: application/json' \
+  -d '{"ruleType":"KEYWORD","pattern":"사내\\s*금칙어","weight":3.0,"reason":"사내 전용"}'
+
+# 가중치 수정/비활성화 (id는 목록 조회로 확인)
+curl -X PUT http://localhost:8090/admin/spam-rules/42 \
+  -H 'Content-Type: application/json' \
+  -d '{"ruleType":"KEYWORD","pattern":"사내\\s*금칙어","weight":5.0,"enabled":false}'
+
+# 삭제
+curl -X DELETE http://localhost:8090/admin/spam-rules/42
+```
+
 ### 7. 관리자/사용자 화이트-블랙리스트
 - 이메일 정확 매치(`user@domain.com`) 또는 도메인 와일드카드(`@domain.com`) 지원, 전역 규칙과 특정 수신자 전용 규칙 모두 가능
 - 화이트리스트는 그레이리스팅·룰기반·LLM 스팸판정을 모두 건너뜀 (명시적 허용이 최우선)

@@ -46,7 +46,7 @@ class SlackEmlRuleBasedCheckTest {
         String body = extractPlainTextBody(message);
 
         GatewayProperties properties = new GatewayProperties();
-        RuleBasedSpamChecker checker = new RuleBasedSpamChecker(properties);
+        RuleBasedSpamChecker checker = new RuleBasedSpamChecker(properties, com.hs.mail.gateway.spamfilter.SpamRuleService.defaults());
         SpamCheckRequest request = new SpamCheckRequest(from, recipients, subject, headers, body);
 
         SpamVerdict verdict = checker.evaluate(request);

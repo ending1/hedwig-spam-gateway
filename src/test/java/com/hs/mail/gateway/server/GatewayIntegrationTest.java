@@ -83,7 +83,7 @@ class GatewayIntegrationTest {
         GatewayChannelInitializer initializer = new GatewayChannelInitializer(properties, banListService,
                 new ConnectionStats(), new NoopSpamClassifier(), new SpamFilterStats(), new SpamClassifierExecutor(properties),
                 greylistService, new RblChecker(properties), new RblStats(), new RblCheckExecutor(),
-                mailListService, new RuleBasedSpamChecker(properties));
+                mailListService, new RuleBasedSpamChecker(properties, com.hs.mail.gateway.spamfilter.SpamRuleService.defaults()));
 
         bossGroup = new NioEventLoopGroup(1);
         workerGroup = new NioEventLoopGroup();

@@ -17,7 +17,7 @@ class RuleBasedSpamCheckerTest {
     @BeforeEach
     void setUp() {
         properties = new GatewayProperties();
-        checker = new RuleBasedSpamChecker(properties);
+        checker = new RuleBasedSpamChecker(properties, com.hs.mail.gateway.spamfilter.SpamRuleService.defaults());
     }
 
     private SpamCheckRequest request(String subject, String body) {

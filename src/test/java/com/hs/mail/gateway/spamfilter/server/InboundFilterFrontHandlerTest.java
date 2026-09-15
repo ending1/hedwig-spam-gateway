@@ -98,7 +98,7 @@ class InboundFilterFrontHandlerTest {
                                 .addLast(new StringEncoder())
                                 .addLast(new InboundFilterFrontHandler(properties, classifier, spamStats,
                                         connectionStats, classifierExecutor, greylistService,
-                                        mailListService, new RuleBasedSpamChecker(properties)));
+                                        mailListService, new RuleBasedSpamChecker(properties, com.hs.mail.gateway.spamfilter.SpamRuleService.defaults())));
                     }
                 });
         serverChannel = bootstrap.bind(0).sync().channel();
