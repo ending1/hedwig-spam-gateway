@@ -29,7 +29,11 @@ RUN_CMD="$JAVA_HOME/bin/java $JAVA_OPTS -jar $JAR --spring.config.location=$GW_H
 # "-D$PNAME"(java의 -D 옵션 형태)로 매칭해야 한다. 단순히 "$PNAME"으로 grep하면 이 스크립트를
 # 호출한 부모 셸의 커맨드라인 자체("GATEWAY_PNAME=... ./bin/start.sh" 등, env var 대입 형태로
 # $PNAME 문자열을 그대로 포함)까지 오탐으로 잡혀버리는 문제가 실제로 있었다.
-running=`ps -eaf | grep -- "-D$PNAME" | grep -v grep | awk '{print $2}'`
+# 뒤에 공백 경계(\b 대용, ps -eaf 출력에서 -D옵션 다음은 항상 공백)까지 요구해야 한다 -
+# 안 그러면 PNAME이 다른 인스턴스 이름의 접두사일 때(예: HEDWIG_SPAM_GATEWAY가
+# HEDWIG_SPAM_GATEWAY_PROD/_NODE2의 접두사) 서로 다른 인스턴스를 오탐/오살(誤殺)하는
+# 사고가 실제로 발생했다.
+running=`ps -eaf | grep -E -- "-D${PNAME}[[:space:]]" | grep -v grep | awk '{print $2}'`
 if [ -n "$running" ]; then
     echo "$PNAME is already running (pid=$running)"
     exit 1
