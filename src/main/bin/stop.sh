@@ -5,7 +5,10 @@
 
 PNAME="${GATEWAY_PNAME:-HEDWIG_SPAM_GATEWAY}"
 
-pid=`ps -eaf | grep "$PNAME" | grep -v grep | awk '{print $2}'`
+# start.sh와 동일한 이유로 "-D$PNAME"(java -D 옵션 형태)로 매칭한다 - 단순 "$PNAME" 매칭은
+# 이 스크립트를 호출한 부모 셸의 "GATEWAY_PNAME=..." 커맨드라인 자체를 오탐해 자기 자신(부모 셸)을
+# 죽여버리는 사고로 이어질 수 있다(실제로 발생했던 문제).
+pid=`ps -eaf | grep -- "-D$PNAME" | grep -v grep | awk '{print $2}'`
 if [ -z "$pid" ]; then
     echo "$PNAME is not running."
     exit 0
