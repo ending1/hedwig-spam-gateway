@@ -175,4 +175,43 @@ class RuleBasedSpamCheckerTest {
         assertTrue(verdict.getScore() > 0);
         assertTrue(verdict.getReason().contains("keyword"));
     }
+
+    private SpamCheckRequest spoofRequest(String fromHeader, String clientIp, String extraHeaders) {
+        String headers = extraHeaders + "From: " + fromHeader
+                + "\nDate: Tue, 15 Sep 2026 10:00:00 +0900\nMessage-ID: <a@b>\nTo: c@d.com";
+        return new SpamCheckRequest(fromHeader, Collections.singletonList("c@d.com"), "hi", headers, "body", clientIp);
+    }
+
+    @Test
+    void 자사_도메인_발신인데_외부_IP면_사칭으로_단독_스팸_확정한다() {
+        properties.getRuleFilter().setInternalDomains(Collections.singletonList("handysoft.co.kr"));
+        SpamVerdict v = checker.evaluate(spoofRequest("zzang@handysoft.co.kr", "178.90.229.163", ""));
+        assertTrue(v.isSpam());
+        assertTrue(v.getReason().contains("internal-domain-spoof:178.90.229.163"));
+    }
+
+    @Test
+    void 자사_도메인_발신이라도_내부_IP면_사칭이_아니다() {
+        properties.getRuleFilter().setInternalDomains(Collections.singletonList("handysoft.co.kr"));
+        SpamVerdict v = checker.evaluate(spoofRequest("kim@handysoft.co.kr", "10.30.9.146", ""));
+        assertFalse(v.getReason().contains("internal-domain-spoof"));
+    }
+
+    @Test
+    void 접속IP가_앞단_내부장비여도_Received_헤더의_외부IP로_사칭을_잡는다() {
+        properties.getRuleFilter().setInternalDomains(Collections.singletonList("handysoft.co.kr"));
+        String received = "Received: from 89.23.154.128 ([89.23.154.128]) by sniper.handysoft.co.kr with ESMTP\n"
+                + "Received: from 10.1.1.5 ([10.1.1.5]) by relay\n";
+        SpamVerdict v = checker.evaluate(spoofRequest("zzang@handysoft.co.kr", "10.1.1.9", received));
+        assertTrue(v.getReason().contains("internal-domain-spoof:89.23.154.128"));
+    }
+
+    @Test
+    void 자사_도메인이_아니거나_설정이_비어있으면_사칭_룰은_동작하지_않는다() {
+        SpamVerdict noConfig = checker.evaluate(spoofRequest("zzang@handysoft.co.kr", "178.90.229.163", ""));
+        assertFalse(noConfig.getReason().contains("internal-domain-spoof"));
+        properties.getRuleFilter().setInternalDomains(Collections.singletonList("handysoft.co.kr"));
+        SpamVerdict other = checker.evaluate(spoofRequest("news@etnews.com", "178.90.229.163", ""));
+        assertFalse(other.getReason().contains("internal-domain-spoof"));
+    }
 }

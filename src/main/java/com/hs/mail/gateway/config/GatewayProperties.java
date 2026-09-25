@@ -685,6 +685,31 @@ public class GatewayProperties {
         private boolean enabled = false;
         private double spamThreshold = 5.0;
         private java.util.List<String> extraKeywords = new java.util.ArrayList<>();
+        /** 자사 도메인 - 이 도메인을 발신자로 쓰는데 외부 IP에서 들어오면 사칭(internal-domain-spoof)으로 본다. 비우면 룰 비활성. */
+        private java.util.List<String> internalDomains = new java.util.ArrayList<>();
+        /**
+         * 신뢰(내부) 네트워크 CIDR. 접속 IP가 여기 속하면 Received 헤더를 거슬러 올라가 실제 외부 발신 IP를
+         * 찾는다(SpamAssassin의 trusted_networks와 같은 개념). 자사 도메인으로 정상 발송하는 외부 SaaS/릴레이의
+         * IP도 여기 넣으면 사칭 판정에서 제외된다.
+         */
+        private java.util.List<String> trustedNetworks = new java.util.ArrayList<>(java.util.Arrays.asList(
+                "127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"));
+
+        public java.util.List<String> getInternalDomains() {
+            return internalDomains;
+        }
+
+        public void setInternalDomains(java.util.List<String> internalDomains) {
+            this.internalDomains = internalDomains;
+        }
+
+        public java.util.List<String> getTrustedNetworks() {
+            return trustedNetworks;
+        }
+
+        public void setTrustedNetworks(java.util.List<String> trustedNetworks) {
+            this.trustedNetworks = trustedNetworks;
+        }
 
         public boolean isEnabled() {
             return enabled;

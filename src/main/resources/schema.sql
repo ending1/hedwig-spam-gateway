@@ -145,4 +145,5 @@ INSERT INTO hw_spam_rule (rule_type, pattern, weight, enabled, reason, created_a
   ('STRUCTURAL', 'link-heavy-html', 1.5, TRUE, '링크 위주 HTML 본문', CURRENT_TIMESTAMP),
   ('STRUCTURAL', 'subject-all-caps', 2.0, TRUE, '제목 전체 대문자', CURRENT_TIMESTAMP),
   ('STRUCTURAL', 'subject-excessive-exclamation', 1.5, TRUE, '느낌표 3개 이상', CURRENT_TIMESTAMP),
-  ('STRUCTURAL', 'empty-body', 1.0, TRUE, '제목은 있는데 본문이 빔', CURRENT_TIMESTAMP);
+  ('STRUCTURAL', 'empty-body', 1.0, TRUE, '제목은 있는데 본문이 빔', CURRENT_TIMESTAMP),
+  ('STRUCTURAL', 'internal-domain-spoof', 5.0, TRUE, '자사 도메인 사칭(외부 IP 발신) - internal-domains 설정 시에만 동작', CURRENT_TIMESTAMP);

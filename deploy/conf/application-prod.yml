@@ -68,6 +68,17 @@ gateway:
   rule-filter:
     enabled: true
     spam-threshold: 5.0
+    # 자사 도메인 사칭 탐지(internal-domain-spoof): 발신자가 이 도메인인데 신뢰 네트워크 밖 IP에서 들어오면
+    # 사칭으로 본다. 2개월치 사내 스팸 코퍼스(32,563건)에서 64%를 차지한 "YOU GOT RECORDED!" 협박 스팸이
+    # 전부 이 유형(From=To=사내 주소, 외부 IP, SPF/DKIM 없음)이었다. 자사 도메인으로 정상 발송하는 외부
+    # SaaS/릴레이가 있으면 그 IP를 trusted-networks에 추가해야 오탐이 없다.
+    internal-domains:
+      - handysoft.co.kr
+    trusted-networks:
+      - 127.0.0.0/8
+      - 10.0.0.0/8
+      - 172.16.0.0/12
+      - 192.168.0.0/16
   mail-list:
     enabled: true
     blacklist-action: reject

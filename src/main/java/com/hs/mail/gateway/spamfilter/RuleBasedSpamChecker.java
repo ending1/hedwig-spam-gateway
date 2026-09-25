@@ -39,11 +39,17 @@ public class RuleBasedSpamChecker {
     private static final Pattern ANCHOR_TAG_PATTERN = Pattern.compile("(?i)<a\\s+[^>]*href=");
 
     private final GatewayProperties.RuleFilter config;
+    private static final Pattern RECEIVED_HEADER_PATTERN =
+            Pattern.compile("(?im)^Received:(.*(?:\n[ \t].*)*)");
+    private static final Pattern IPV4_PATTERN = Pattern.compile("\\b(\\d{1,3}(?:\\.\\d{1,3}){3})\\b");
+
     private final SpamRuleService ruleService;
+    private final NetworkMatcher trustedNetworks;
 
     public RuleBasedSpamChecker(GatewayProperties properties, SpamRuleService ruleService) {
         this.config = properties.getRuleFilter();
         this.ruleService = ruleService;
+        this.trustedNetworks = new NetworkMatcher(config.getTrustedNetworks());
     }
 
     public SpamVerdict evaluate(SpamCheckRequest request) {
@@ -110,6 +116,15 @@ public class RuleBasedSpamChecker {
             }
         }
 
+        if (ruleService.isStructuralEnabled("internal-domain-spoof")) {
+            String spoofOrigin = findInternalDomainSpoofOrigin(request);
+            if (spoofOrigin != null) {
+                // 자사 도메인 사칭은 인증 없이 외부에서 들어온 것이라 단독으로 스팸 확정(임계치 도달)이 기본값.
+                score += ruleService.getStructuralWeight("internal-domain-spoof", config.getSpamThreshold());
+                reasons.add("internal-domain-spoof:" + spoofOrigin);
+            }
+        }
+
         String brandMismatch = findBrandImpersonation(request);
         if (brandMismatch != null) {
             score += findBrandWeight(brandMismatch);
@@ -173,6 +188,50 @@ public class RuleBasedSpamChecker {
             mismatches.add(domain);
         }
         return mismatches;
+    }
+
+    /**
+     * 발신자(MAIL FROM 또는 From 헤더)가 자사 도메인인데 실제 발신 IP가 신뢰 네트워크 밖이면 그 외부 IP를
+     * 반환한다(사내 도메인 사칭). 접속 IP가 신뢰 네트워크(내부 릴레이/앞단 장비)면 Received 헤더를 위에서부터
+     * 거슬러 올라가 처음 나오는 비신뢰 IP를 실제 발신지로 본다. internal-domains가 비어있거나 접속 IP를
+     * 모르면(오프라인 재생 등) 판정하지 않는다. SPF/DKIM 검증을 하지 않으므로, 자사 도메인으로 정상 발송하는
+     * 외부 SaaS/릴레이 IP는 trusted-networks에 등록해야 오탐이 없다.
+     */
+    private String findInternalDomainSpoofOrigin(SpamCheckRequest request) {
+        List<String> internalDomains = config.getInternalDomains();
+        if (internalDomains == null || internalDomains.isEmpty() || request.getClientIp() == null) {
+            return null;
+        }
+        Matcher fromMatcher = FROM_HEADER_PATTERN.matcher(nullToEmpty(request.getHeaders()));
+        String fromHeaderDomain = fromMatcher.find() ? extractDomain(fromMatcher.group(1)) : "";
+        String envelopeDomain = extractDomain(nullToEmpty(request.getFrom()));
+        if (!isInternalDomain(fromHeaderDomain, internalDomains) && !isInternalDomain(envelopeDomain, internalDomains)) {
+            return null;
+        }
+        if (!trustedNetworks.contains(request.getClientIp())) {
+            return request.getClientIp();
+        }
+        Matcher received = RECEIVED_HEADER_PATTERN.matcher(nullToEmpty(request.getHeaders()));
+        while (received.find()) {
+            Matcher ip = IPV4_PATTERN.matcher(received.group(1));
+            if (ip.find() && !trustedNetworks.contains(ip.group(1))) {
+                return ip.group(1);
+            }
+        }
+        return null;
+    }
+
+    private static boolean isInternalDomain(String domain, List<String> internalDomains) {
+        if (domain == null || domain.isEmpty()) {
+            return false;
+        }
+        for (String internal : internalDomains) {
+            String d = internal.toLowerCase(Locale.ROOT);
+            if (domain.equals(d) || domain.endsWith("." + d)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 본문에 등장하는 URL의 호스트명 목록(중복 제거). */

@@ -12,13 +12,25 @@ public class SpamCheckRequest {
     private final String subject;
     private final String headers;
     private final String body;
+    private final String clientIp;
 
     public SpamCheckRequest(String from, List<String> recipients, String subject, String headers, String body) {
+        this(from, recipients, subject, headers, body, null);
+    }
+
+    /** clientIp는 게이트웨이가 본 SMTP 접속 IP(테스트/오프라인 재생 시에는 null 가능). */
+    public SpamCheckRequest(String from, List<String> recipients, String subject, String headers, String body,
+                            String clientIp) {
         this.from = from;
         this.recipients = Collections.unmodifiableList(recipients);
         this.subject = subject;
         this.headers = headers;
         this.body = body;
+        this.clientIp = clientIp;
+    }
+
+    public String getClientIp() {
+        return clientIp;
     }
 
     public String getFrom() {
@@ -47,6 +59,11 @@ public class SpamCheckRequest {
      */
     public static SpamCheckRequest from(String mailFrom, List<String> recipients, List<String> rawLines,
                                          int maxBodyChars) {
+        return from(mailFrom, recipients, rawLines, maxBodyChars, null);
+    }
+
+    public static SpamCheckRequest from(String mailFrom, List<String> recipients, List<String> rawLines,
+                                         int maxBodyChars, String clientIp) {
         int blankIndex = -1;
         for (int i = 0; i < rawLines.size(); i++) {
             if (rawLines.get(i).isEmpty()) {
@@ -72,6 +89,6 @@ public class SpamCheckRequest {
         if (body.length() > maxBodyChars) {
             body = body.substring(0, maxBodyChars);
         }
-        return new SpamCheckRequest(mailFrom, recipients, subject, headers, body);
+        return new SpamCheckRequest(mailFrom, recipients, subject, headers, body, clientIp);
     }
 }

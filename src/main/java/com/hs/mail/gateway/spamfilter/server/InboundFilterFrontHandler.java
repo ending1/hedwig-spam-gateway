@@ -235,7 +235,7 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
         String mailFrom = session.mailFrom;
         List<String> recipients = session.recipients;
         SpamCheckRequest request = SpamCheckRequest.from(mailFrom, recipients, bufferedLines,
-                properties.getSpamFilter().getMaxBodyChars());
+                properties.getSpamFilter().getMaxBodyChars(), clientIp(ctx));
 
         if (properties.getRuleFilter().isEnabled()) {
             SpamVerdict ruleVerdict = ruleBasedSpamChecker.evaluate(request);
