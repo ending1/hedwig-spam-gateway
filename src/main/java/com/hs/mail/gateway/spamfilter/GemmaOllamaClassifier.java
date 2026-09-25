@@ -8,7 +8,7 @@ import com.hs.mail.gateway.config.GatewayProperties;
 import java.util.Collections;
 
 /** 로컬 Ollama(Gemma 등)에서 구동되는 모델을 호출하는 테스트/개발용 분류기. */
-public class GemmaOllamaClassifier implements SpamClassifier {
+public class GemmaOllamaClassifier implements SpamClassifier, TextCompleter {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -35,9 +35,14 @@ public class GemmaOllamaClassifier implements SpamClassifier {
 
     @Override
     public SpamVerdict classify(SpamCheckRequest request) throws Exception {
+        return VerdictJsonParser.parse(complete(prompt(request)), name());
+    }
+
+    @Override
+    public String complete(String prompt) throws Exception {
         ObjectNode payload = MAPPER.createObjectNode();
         payload.put("model", config.getGemma().getModel());
-        payload.put("prompt", prompt(request));
+        payload.put("prompt", prompt);
         payload.put("stream", false);
         payload.put("format", "json");
 
@@ -46,8 +51,7 @@ public class GemmaOllamaClassifier implements SpamClassifier {
                 MAPPER.writeValueAsString(payload), config.getTimeoutMillis());
 
         JsonNode root = MAPPER.readTree(responseBody);
-        String modelText = root.path("response").asText("");
-        return VerdictJsonParser.parse(modelText, name());
+        return root.path("response").asText("");
     }
 
     @Override

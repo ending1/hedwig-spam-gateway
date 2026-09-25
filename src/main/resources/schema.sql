@@ -33,3 +33,20 @@ CREATE TABLE IF NOT EXISTS hw_spam_rule (
 
 -- 기본 룰셋 시드는 SpamRuleService가 기동 시 hw_spam_rule이 비어 있을 때만 넣는다(인메모리/파일/외부 DB 공통).
 -- 이 스크립트는 기동할 때마다 실행되므로 INSERT를 두면 파일 DB에서 재기동마다 중복된다.
+
+CREATE TABLE IF NOT EXISTS hw_spam_rule_stat (
+    rule_id BIGINT PRIMARY KEY,
+    hit_count BIGINT NOT NULL DEFAULT 0,
+    spam_hit_count BIGINT NOT NULL DEFAULT 0,
+    last_hit_at TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS hw_spam_rule_sample (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    rule_id BIGINT NOT NULL,
+    subject VARCHAR(200),
+    snippet VARCHAR(500),
+    from_domain VARCHAR(255),
+    spam_verdict BOOLEAN NOT NULL,
+    created_at TIMESTAMP NOT NULL
+);

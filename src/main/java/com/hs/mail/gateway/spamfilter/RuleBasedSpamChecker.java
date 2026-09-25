@@ -46,6 +46,14 @@ public class RuleBasedSpamChecker {
     private final SpamRuleService ruleService;
     private final NetworkMatcher trustedNetworks;
 
+    private RuleStatService statService;
+
+    /** 적중 통계 수집기(선택). 없으면(단위 테스트/도구) 기록하지 않는다. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setStatService(RuleStatService statService) {
+        this.statService = statService;
+    }
+
     public RuleBasedSpamChecker(GatewayProperties properties, SpamRuleService ruleService) {
         this.config = properties.getRuleFilter();
         this.ruleService = ruleService;
@@ -59,11 +67,13 @@ public class RuleBasedSpamChecker {
 
         double score = 0.0;
         List<String> reasons = new ArrayList<>();
+        List<Long> hits = new ArrayList<>();
 
         for (Map.Entry<Pattern, SpamRuleEntry> rule : ruleService.getKeywordRules().entrySet()) {
             if (rule.getKey().matcher(combined).find()) {
                 score += rule.getValue().getWeight();
                 reasons.add("keyword:" + rule.getKey().pattern());
+                addHit(hits, rule.getValue().getId());
             }
         }
 
@@ -78,23 +88,27 @@ public class RuleBasedSpamChecker {
         if (ruleService.isStructuralEnabled("subject-all-caps") && isMostlyUpperCase(subject)) {
             score += ruleService.getStructuralWeight("subject-all-caps", 2.0);
             reasons.add("subject-all-caps");
+            addHit(hits, ruleService.getStructuralId("subject-all-caps"));
         }
 
         long exclamationCount = subject.chars().filter(c -> c == '!').count();
         if (ruleService.isStructuralEnabled("subject-excessive-exclamation") && exclamationCount >= 3) {
             score += ruleService.getStructuralWeight("subject-excessive-exclamation", 1.5);
             reasons.add("subject-excessive-exclamation");
+            addHit(hits, ruleService.getStructuralId("subject-excessive-exclamation"));
         }
 
         if (ruleService.isStructuralEnabled("empty-body") && !subject.isEmpty() && body.trim().isEmpty()) {
             score += ruleService.getStructuralWeight("empty-body", 1.0);
             reasons.add("empty-body");
+            addHit(hits, ruleService.getStructuralId("empty-body"));
         }
 
         for (String mismatchedDomain : findEmbeddedFreeMailDomainMismatches(request)) {
             // 이 신호 하나만으로도 스팸 확정(단독 임계치 도달) - 실측(Gemini)에서 반복 검증된 강한 신호.
             score += config.getSpamThreshold();
             reasons.add("embedded-email-domain-mismatch:" + mismatchedDomain);
+            addHit(hits, findFreeMailDomainId(mismatchedDomain));
         }
 
         // --- 이하 SpamAssassin류 언어무관 구조/URL/헤더 체크 (네트워크 조회 없이 텍스트만으로 판정) ---
@@ -106,13 +120,16 @@ public class RuleBasedSpamChecker {
             if (ruleService.isStructuralEnabled("url-raw-ip") && RAW_IP_HOST_PATTERN.matcher(host).matches()) {
                 score += ruleService.getStructuralWeight("url-raw-ip", 3.0);
                 reasons.add("url-raw-ip:" + host);
+                addHit(hits, ruleService.getStructuralId("url-raw-ip"));
             } else if (ruleService.isStructuralEnabled("url-punycode-domain")
                     && (host.startsWith("xn--") || host.contains(".xn--"))) {
                 score += ruleService.getStructuralWeight("url-punycode-domain", 3.0);
                 reasons.add("url-punycode-domain:" + host);
+                addHit(hits, ruleService.getStructuralId("url-punycode-domain"));
             } else if (shortener != null) {
                 score += shortener.getWeight();
                 reasons.add("url-shortener:" + host);
+                addHit(hits, shortener.getId());
             }
         }
 
@@ -122,6 +139,7 @@ public class RuleBasedSpamChecker {
                 // 자사 도메인 사칭은 인증 없이 외부에서 들어온 것이라 단독으로 스팸 확정(임계치 도달)이 기본값.
                 score += ruleService.getStructuralWeight("internal-domain-spoof", config.getSpamThreshold());
                 reasons.add("internal-domain-spoof:" + spoofOrigin);
+                addHit(hits, ruleService.getStructuralId("internal-domain-spoof"));
             }
         }
 
@@ -129,21 +147,25 @@ public class RuleBasedSpamChecker {
         if (brandMismatch != null) {
             score += findBrandWeight(brandMismatch);
             reasons.add("brand-impersonation:" + brandMismatch);
+            addHit(hits, findBrandId(brandMismatch));
         }
 
         if (ruleService.isStructuralEnabled("missing-date-header") && !DATE_HEADER_PATTERN.matcher(headers).find()) {
             score += ruleService.getStructuralWeight("missing-date-header", 1.0);
             reasons.add("missing-date-header");
+            addHit(hits, ruleService.getStructuralId("missing-date-header"));
         }
         if (ruleService.isStructuralEnabled("missing-message-id")
                 && !MESSAGE_ID_HEADER_PATTERN.matcher(headers).find()) {
             score += ruleService.getStructuralWeight("missing-message-id", 1.0);
             reasons.add("missing-message-id");
+            addHit(hits, ruleService.getStructuralId("missing-message-id"));
         }
         if (ruleService.isStructuralEnabled("envelope-header-recipient-mismatch")
                 && isEnvelopeRecipientMismatch(request)) {
             score += ruleService.getStructuralWeight("envelope-header-recipient-mismatch", 1.5);
             reasons.add("envelope-header-recipient-mismatch");
+            addHit(hits, ruleService.getStructuralId("envelope-header-recipient-mismatch"));
         }
 
         int anchorCount = countMatches(ANCHOR_TAG_PATTERN, body);
@@ -152,12 +174,20 @@ public class RuleBasedSpamChecker {
             // 본문 대부분이 링크로 채워진, 텍스트 비중이 극히 낮은 HTML - 전형적인 피싱/스팸 살포 메일 형태.
             score += ruleService.getStructuralWeight("link-heavy-html", 1.5);
             reasons.add("link-heavy-html");
+            addHit(hits, ruleService.getStructuralId("link-heavy-html"));
         }
 
         boolean spam = score >= config.getSpamThreshold();
         double normalizedScore = Math.min(1.0, score / (config.getSpamThreshold() * 2));
         String reason = reasons.isEmpty() ? "no rule matched" : String.join(", ", reasons);
-        return new SpamVerdict(spam, normalizedScore, reason, "rule-based");
+        if (statService != null && !hits.isEmpty()) {
+            try {
+                statService.record(hits, spam, request);
+            } catch (RuntimeException e) {
+                // 통계 실패가 메일 처리에 영향을 주면 안 된다.
+            }
+        }
+        return new SpamVerdict(spam, normalizedScore, reason, "rule-based", hits);
     }
 
     /**
@@ -248,6 +278,30 @@ public class RuleBasedSpamChecker {
         for (SpamRuleEntry entry : ruleService.getUrlShortenerRules()) {
             if (entry.getPattern().equalsIgnoreCase(host)) {
                 return entry;
+            }
+        }
+        return null;
+    }
+
+    private static void addHit(List<Long> hits, Long id) {
+        if (id != null && !hits.contains(id)) {
+            hits.add(id);
+        }
+    }
+
+    private Long findBrandId(String brand) {
+        for (SpamRuleEntry entry : ruleService.getBrandRules()) {
+            if (entry.getPattern().equalsIgnoreCase(brand)) {
+                return entry.getId();
+            }
+        }
+        return null;
+    }
+
+    private Long findFreeMailDomainId(String domain) {
+        for (SpamRuleEntry entry : ruleService.getFreeMailDomainRules()) {
+            if (entry.getPattern().equalsIgnoreCase(domain)) {
+                return entry.getId();
             }
         }
         return null;

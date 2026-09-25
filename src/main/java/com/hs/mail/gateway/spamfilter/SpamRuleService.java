@@ -224,6 +224,12 @@ public class SpamRuleService {
         return entry != null ? entry.getWeight() : defaultWeight;
     }
 
+    /** 구조체크 행의 id(적중 통계용). 행이 없으면(코드 기본값으로 동작 중) null. */
+    public Long getStructuralId(String key) {
+        SpamRuleEntry entry = structuralRules.get(key);
+        return entry != null ? entry.getId() : null;
+    }
+
     /** STRUCTURAL 타입 행이 없으면 항상 활성으로 간주한다. */
     public boolean isStructuralEnabled(String key) {
         SpamRuleEntry entry = structuralRules.get(key);

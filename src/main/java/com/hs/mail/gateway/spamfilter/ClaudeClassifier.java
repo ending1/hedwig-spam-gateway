@@ -10,7 +10,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 /** Anthropic Messages API 호출 분류기 (제품 후보 - 예: claude-3-5-haiku). */
-public class ClaudeClassifier implements SpamClassifier {
+public class ClaudeClassifier implements SpamClassifier, TextCompleter {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String API_URL = "https://api.anthropic.com/v1/messages";
@@ -38,13 +38,18 @@ public class ClaudeClassifier implements SpamClassifier {
 
     @Override
     public SpamVerdict classify(SpamCheckRequest request) throws Exception {
+        return VerdictJsonParser.parse(complete(prompt(request)), name());
+    }
+
+    @Override
+    public String complete(String prompt) throws Exception {
         ObjectNode payload = MAPPER.createObjectNode();
         payload.put("model", config.getClaude().getModel());
-        payload.put("max_tokens", 300);
+        payload.put("max_tokens", 1200);
         ArrayNode messages = payload.putArray("messages");
         ObjectNode message = messages.addObject();
         message.put("role", "user");
-        message.put("content", prompt(request));
+        message.put("content", prompt);
 
         Map<String, String> headers = new HashMap<>();
         headers.put("x-api-key", config.getClaude().getApiKey());
@@ -54,8 +59,7 @@ public class ClaudeClassifier implements SpamClassifier {
                 MAPPER.writeValueAsString(payload), config.getTimeoutMillis());
 
         JsonNode root = MAPPER.readTree(responseBody);
-        String modelText = root.path("content").path(0).path("text").asText("");
-        return VerdictJsonParser.parse(modelText, name());
+        return root.path("content").path(0).path("text").asText("");
     }
 
     @Override

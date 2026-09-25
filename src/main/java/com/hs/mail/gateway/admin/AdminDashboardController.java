@@ -78,9 +78,10 @@ public class AdminDashboardController {
                 "    <button type=\"submit\">추가</button>\n" +
                 "  </form>\n" +
                 "  <table id=\"ruleTable\">\n" +
-                "    <thead><tr><th>ID</th><th>유형</th><th>패턴</th><th>가중치</th><th>상태</th><th>설명</th><th></th></tr></thead>\n" +
+                "    <thead><tr><th>ID</th><th>유형</th><th>패턴</th><th>가중치</th><th>적중(스팸판정)</th><th>상태</th><th>설명</th><th></th></tr></thead>\n" +
                 "    <tbody></tbody>\n" +
                 "  </table>\n" +
+                "  <div id=\"advicePanel\" style=\"display:none;margin-top:1rem;padding:1rem;background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px\"></div>\n" +
                 "</section>\n" +
                 "<script>\n" +
                 "const KEY_STORE = 'hedwigAdminKey';\n" +
@@ -156,18 +157,52 @@ public class AdminDashboardController {
                 "  const res = await adminFetch('/admin/spam-rules');\n" +
                 "  if (!res.ok) { document.querySelector('#ruleTable tbody').innerHTML = ''; return; }\n" +
                 "  const rows = await res.json();\n" +
+                "  ruleById = {}; rows.forEach(r => { ruleById[r.id] = r; });\n" +
+                "  const stats = {};\n" +
+                "  try { const sr = await adminFetch('/admin/spam-rules/stats'); if (sr.ok) (await sr.json()).forEach(x => { stats[x.ruleId] = x; }); } catch (e) {}\n" +
                 "  const tbody = document.querySelector('#ruleTable tbody');\n" +
                 "  tbody.innerHTML = rows.map(r => `<tr>\n" +
                 "    <td>${r.id}</td><td>${r.ruleType}</td><td>${escapeHtml(r.pattern)}</td><td>${r.weight}</td>\n" +
+                "    <td>${stats[r.id] ? stats[r.id].hits + ' (' + stats[r.id].spamHits + ')' : '0'}</td>\n" +
                 "    <td>${r.enabled ? '활성' : '비활성'}</td><td>${r.reason || ''}</td>\n" +
                 "    <td>\n" +
                 "      <button onclick=\"toggleRule(${r.id}, '${r.ruleType}', '${encodeAttr(r.pattern)}', ${r.weight}, ${!r.enabled}, '${encodeAttr(r.reason || '')}')\">${r.enabled ? '비활성화' : '활성화'}</button>\n" +
+                "      <button onclick=\"analyzeRule(${r.id})\">분석</button>\n" +
                 "      <button class=\"danger\" onclick=\"removeRule(${r.id})\">삭제</button>\n" +
                 "    </td>\n" +
                 "  </tr>`).join('');\n" +
                 "}\n" +
                 "function escapeHtml(s) { const d = document.createElement('div'); d.innerText = s == null ? '' : s; return d.innerHTML; }\n" +
                 "function encodeAttr(s) { return (s == null ? '' : s).replace(/'/g, \"\\\\'\"); }\n" +
+                "let ruleById = {};\n" +
+                "/** 룰 적중 샘플을 보여주고 LLM 조언을 받아 패널에 표시한다. 적용은 관리자가 버튼으로 직접 한다. */\n" +
+                "async function analyzeRule(id) {\n" +
+                "  const panel = document.getElementById('advicePanel');\n" +
+                "  const r = ruleById[id];\n" +
+                "  panel.style.display = 'block';\n" +
+                "  panel.innerHTML = '분석 중... (LLM 호출, 수 초 걸릴 수 있음)';\n" +
+                "  let html = `<b>룰 #${id}</b> ${escapeHtml(r.pattern)} (현재 가중치 ${r.weight})<br>`;\n" +
+                "  const sres = await adminFetch(`/admin/spam-rules/${id}/samples`);\n" +
+                "  if (sres.ok) {\n" +
+                "    const samples = await sres.json();\n" +
+                "    html += '<details><summary>적중 샘플 ' + samples.length + '건(마스킹됨)</summary><ul>' + samples.map(s => `<li>[${s.spamVerdict ? '스팸' : '정상'}] ${escapeHtml(s.fromDomain)} | ${escapeHtml(s.subject)} | ${escapeHtml(s.snippet)}</li>`).join('') + '</ul></details>';\n" +
+                "  }\n" +
+                "  const ares = await adminFetch(`/admin/spam-rules/${id}/advice`, { method: 'POST' });\n" +
+                "  const body = await ares.json();\n" +
+                "  if (!ares.ok) { panel.innerHTML = html + `<p style=\"color:#dc2626\">${escapeHtml(body.error || '조언을 받지 못했습니다')}</p>`; return; }\n" +
+                "  const actionKo = { KEEP: '유지', RAISE: '상향', LOWER: '하향', DISABLE: '비활성화' }[body.action] || body.action;\n" +
+                "  html += `<p><b>LLM 조언(참고용)</b>: ${actionKo}` + (body.recommendedWeight != null ? ` → 권장 가중치 ${body.recommendedWeight}` : '') + ` (신뢰도 ${body.confidence}, 적중 ${body.hits}건)<br>${escapeHtml(body.rationale)}</p>`;\n" +
+                "  html += '<button id=\"applyAdvice\">권장 가중치 적용</button> <button id=\"closeAdvice\" style=\"background:#6b7280\">닫기</button>';\n" +
+                "  panel.innerHTML = html;\n" +
+                "  document.getElementById('closeAdvice').onclick = () => { panel.style.display = 'none'; };\n" +
+                "  document.getElementById('applyAdvice').onclick = async () => {\n" +
+                "    const w = body.action === 'DISABLE' ? r.weight : body.recommendedWeight;\n" +
+                "    if (w == null) { alert('권장 가중치가 없습니다'); return; }\n" +
+                "    if (!confirm(`룰 #${id}를 ` + (body.action === 'DISABLE' ? '비활성화' : `가중치 ${w}로 변경`) + '합니다. 진행할까요?')) return;\n" +
+                "    await toggleRule(id, r.ruleType, r.pattern, w, body.action === 'DISABLE' ? false : r.enabled, r.reason || '');\n" +
+                "    panel.style.display = 'none';\n" +
+                "  };\n" +
+                "}\n" +
                 "async function toggleRule(id, ruleType, pattern, weight, enabled, reason) {\n" +
                 "  await adminFetch(`/admin/spam-rules/${id}`, {\n" +
                 "    method: 'PUT', headers: { 'Content-Type': 'application/json' },\n" +

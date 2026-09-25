@@ -14,7 +14,7 @@ import java.util.Collections;
  * Gemini만 본문 속 발신자 불일치(outlook.com)를 잡아내 스팸으로 정확히 판정 - 현재까지 실측 정확도가
  * 가장 높은 제품 후보.
  */
-public class GeminiClassifier implements SpamClassifier {
+public class GeminiClassifier implements SpamClassifier, TextCompleter {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -41,11 +41,16 @@ public class GeminiClassifier implements SpamClassifier {
 
     @Override
     public SpamVerdict classify(SpamCheckRequest request) throws Exception {
+        return VerdictJsonParser.parse(complete(prompt(request)), name());
+    }
+
+    @Override
+    public String complete(String prompt) throws Exception {
         ObjectNode payload = MAPPER.createObjectNode();
         ArrayNode contents = payload.putArray("contents");
         ObjectNode content = contents.addObject();
         ArrayNode parts = content.putArray("parts");
-        parts.addObject().put("text", prompt(request));
+        parts.addObject().put("text", prompt);
 
         String url = "https://generativelanguage.googleapis.com/v1beta/models/"
                 + config.getGemini().getModel() + ":generateContent?key=" + config.getGemini().getApiKey();
@@ -53,9 +58,8 @@ public class GeminiClassifier implements SpamClassifier {
                 MAPPER.writeValueAsString(payload), config.getTimeoutMillis());
 
         JsonNode root = MAPPER.readTree(responseBody);
-        String modelText = root.path("candidates").path(0).path("content").path("parts").path(0)
+        return root.path("candidates").path(0).path("content").path("parts").path(0)
                 .path("text").asText("");
-        return VerdictJsonParser.parse(modelText, name());
     }
 
     @Override
