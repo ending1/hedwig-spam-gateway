@@ -84,11 +84,32 @@ public class SpamCheckRequest {
             }
         }
 
-        String headers = String.join("\n", headerLines);
+        String headers = MimeTextDecoder.decodeHeaderText(String.join("\n", headerLines));
+        subject = MimeTextDecoder.decodeHeaderText(subject);
         String body = String.join("\n", bodyLines);
+        if (isTransferEncoded(headerLines)) {
+            // quoted-printable/base64 본문은 디코딩하지 않으면 한글 키워드 룰이 매치되지 않는다. 실패하면 원문 유지.
+            String decoded = MimeTextDecoder.decodeBody(rawLines);
+            if (decoded != null) {
+                body = decoded;
+            }
+        }
         if (body.length() > maxBodyChars) {
             body = body.substring(0, maxBodyChars);
         }
         return new SpamCheckRequest(mailFrom, recipients, subject, headers, body, clientIp);
+    }
+    private static boolean isTransferEncoded(List<String> headerLines) {
+        for (String h : headerLines) {
+            String lower = h.toLowerCase(java.util.Locale.ROOT);
+            if (lower.startsWith("content-transfer-encoding:")
+                    && (lower.contains("quoted-printable") || lower.contains("base64"))) {
+                return true;
+            }
+            if (lower.startsWith("content-type:") && lower.contains("multipart/")) {
+                return true;
+            }
+        }
+        return false;
     }
 }

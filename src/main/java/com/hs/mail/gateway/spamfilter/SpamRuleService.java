@@ -61,6 +61,16 @@ public class SpamRuleService {
         return new SpamRuleService(buildDefaultEntries());
     }
 
+    /** 오프라인 도구/테스트가 임의의 고정 룰 목록으로 엔진을 평가할 때 쓴다(DB 쓰기 불가). */
+    public static SpamRuleService fixed(List<SpamRuleEntry> rules) {
+        return new SpamRuleService(rules);
+    }
+
+    /** {@code schema.sql}에 시드된 기본 룰셋 목록(키워드/프리메일/브랜드/URL 단축서비스). */
+    public static List<SpamRuleEntry> defaultEntries() {
+        return buildDefaultEntries();
+    }
+
     private static List<SpamRuleEntry> buildDefaultEntries() {
         List<SpamRuleEntry> entries = new ArrayList<>();
         String[][] keywords = {
