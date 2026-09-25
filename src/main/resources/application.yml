@@ -12,6 +12,11 @@ management:
         include: gateway,health
 
 spring:
+  sql:
+    init:
+      # schema.sql은 CREATE TABLE IF NOT EXISTS라 멱등이다. 기본값(embedded)은 인메모리 H2에서만 실행하고
+      # 파일 H2/외부 DB에서는 건너뛰어 테이블이 없는 채로 기동하는 함정이 있어 always로 고정한다.
+      mode: always
   datasource:
     # 현장 설치 시 Hedwig이 사용 중인 동일 RDBMS 접속 정보로 교체한다 (default.properties의 jdbc.* 참고).
     url: jdbc:h2:mem:gateway;MODE=MySQL
