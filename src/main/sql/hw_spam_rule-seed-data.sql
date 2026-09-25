@@ -1,3 +1,5 @@
+-- 참고: 게이트웨이는 기동 시 hw_spam_rule이 비어 있으면 같은 기본 룰셋을 자동으로 시드하므로
+-- 보통 이 스크립트를 따로 적용할 필요가 없다. DBA가 사전에 데이터를 넣어두고 싶을 때만 쓴다.
 -- hw_spam_rule 초기 데이터 - RuleBasedSpamChecker에 원래 내장돼 있던 기본 룰셋과 동일하다.
 -- 표준 ANSI INSERT라 오라클/마리아DB/MSSQL 모두에서 그대로 쓸 수 있다. 테이블 생성
 -- (각 dialect의 hw_spam_rule-schema.sql) 후 DBA가 1회성으로 적용한다. id는 자동 채번이므로

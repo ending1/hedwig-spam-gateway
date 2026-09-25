@@ -14,7 +14,11 @@ management:
 
 spring:
   datasource:
-    url: jdbc:h2:mem:gateway-prod;MODE=MySQL;DB_CLOSE_DELAY=-1
+    # 영구 저장(H2 파일 모드): 재기동해도 스팸 룰/화이트-블랙리스트/그레이리스팅/밴 목록이 유지된다.
+    # 파일 DB는 한 프로세스만 열 수 있으므로 인스턴스는 1개여야 한다. 여러 인스턴스(SO_REUSEPORT)가
+    # 상태를 공유하려면 Oracle/MariaDB/MSSQL이 필요하다(JDBC 드라이버 추가 필요). 디렉터리는 미리 만들어 둔다.
+    # 백업: 게이트웨이를 멈춘 뒤 gateway.mv.db 파일을 복사한다.
+    url: jdbc:h2:file:/home/egov/hedwig_spam_prod/data/gateway;MODE=MySQL
     driver-class-name: org.h2.Driver
     username: sa
     password:

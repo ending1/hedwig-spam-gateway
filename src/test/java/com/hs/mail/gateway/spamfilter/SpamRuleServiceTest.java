@@ -106,4 +106,49 @@ class SpamRuleServiceTest {
         assertFalse(defaults.getFreeMailDomainRules().isEmpty());
         assertFalse(defaults.getUrlShortenerRules().isEmpty());
     }
+
+    @Test
+    void 테이블이_비어있으면_기동시_기본_룰셋을_시드한다() {
+        SpamRuleDao emptyDao = mock(SpamRuleDao.class);
+        when(emptyDao.findAll()).thenReturn(Collections.<SpamRuleEntry>emptyList());
+
+        new SpamRuleService(emptyDao);
+
+        org.mockito.Mockito.verify(emptyDao, org.mockito.Mockito.times(SpamRuleService.seedEntries().size()))
+                .insert(org.mockito.ArgumentMatchers.any(SpamRuleEntry.class));
+    }
+
+    @Test
+    void 이미_룰이_있으면_시드하지_않아_관리자_수정이_재기동으로_되살아나지_않는다() {
+        SpamRuleDao filledDao = mock(SpamRuleDao.class);
+        when(filledDao.findAll()).thenReturn(Collections.singletonList(
+                new SpamRuleEntry(1L, SpamRuleEntry.RuleType.KEYWORD, "관리자가남긴룰", 1.0, false, null)));
+
+        new SpamRuleService(filledDao);
+
+        org.mockito.Mockito.verify(filledDao, org.mockito.Mockito.never())
+                .insert(org.mockito.ArgumentMatchers.any(SpamRuleEntry.class));
+    }
+
+    @Test
+    void 시드_중_DB_오류가_나도_기동은_계속된다() {
+        SpamRuleDao brokenDao = mock(SpamRuleDao.class);
+        when(brokenDao.findAll()).thenReturn(Collections.<SpamRuleEntry>emptyList());
+        when(brokenDao.insert(org.mockito.ArgumentMatchers.any(SpamRuleEntry.class))).thenThrow(new RuntimeException("db down"));
+
+        SpamRuleService svc = new SpamRuleService(brokenDao);
+
+        assertTrue(svc.getKeywordRules().isEmpty());
+    }
+
+    @Test
+    void 시드에는_구조체크_가중치_행과_사내도메인_사칭_행이_포함된다() {
+        boolean spoof = false;
+        for (SpamRuleEntry e : SpamRuleService.seedEntries()) {
+            if (e.getRuleType() == SpamRuleEntry.RuleType.STRUCTURAL && "internal-domain-spoof".equals(e.getPattern())) {
+                spoof = true;
+            }
+        }
+        assertTrue(spoof);
+    }
 }

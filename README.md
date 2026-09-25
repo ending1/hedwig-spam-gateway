@@ -58,6 +58,8 @@
 있다. 정규식(KEYWORD)은 등록 시 컴파일 검증을 거치고, 캐시 갱신 시점에도 실패한 행은 로그만 남기고
 건너뛰어 잘못된 정규식 하나가 전체 필터를 멈추지 않는다.
 
+**저장 위치**: 기본 설정은 인메모리 H2라 재기동하면 룰/그레이리스팅 상태가 초기화된다(빠른 시작용). 운영에서는 `spring.datasource.url`을 파일 모드(`jdbc:h2:file:<경로>/gateway;MODE=MySQL`)로 바꾸면 영구 저장된다 (`deploy/conf/application-prod.yml` 참고). 기본 룰셋은 `hw_spam_rule`이 비어 있을 때 **처음 한 번만** 시드하므로, 관리자가 수정/삭제한 룰이 재기동으로 되살아나지 않는다(삭제보다 비활성화를 권장). 파일 DB는 한 프로세스만 열 수 있어 인스턴스가 여러 개면 외부 DB(Oracle/MariaDB/MSSQL)가 필요하다.
+
 ```bash
 # 목록 조회
 curl http://localhost:8090/admin/spam-rules

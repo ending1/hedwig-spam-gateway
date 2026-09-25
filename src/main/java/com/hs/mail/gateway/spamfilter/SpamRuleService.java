@@ -39,7 +39,50 @@ public class SpamRuleService {
     @Autowired
     public SpamRuleService(SpamRuleDao dao) {
         this.dao = dao;
+        seedIfEmpty();
         refresh();
+    }
+
+    /**
+     * hw_spam_rule이 비어 있을 때만 기본 룰셋을 넣는다. 영구 DB(파일 H2/외부 DB)에서는 관리자가 수정/삭제한
+     * 룰이 재기동으로 되살아나면 안 되므로 "처음 한 번"만 시드하고, 이후에는 DB 내용을 그대로 신뢰한다.
+     * 실패해도 기동은 계속한다(코드 내장 기본값으로도 필터는 동작).
+     */
+    private void seedIfEmpty() {
+        try {
+            if (!dao.findAll().isEmpty()) {
+                return;
+            }
+            List<SpamRuleEntry> seeds = seedEntries();
+            for (SpamRuleEntry seed : seeds) {
+                dao.insert(seed);
+            }
+            log.info("스팸 룰 테이블이 비어 있어 기본 룰셋 {}건을 시드했다", seeds.size());
+        } catch (Exception e) {
+            log.warn("스팸 룰 기본값 시드 실패, 계속 진행한다: {}", e.getMessage());
+        }
+    }
+
+    /** 기본 룰셋 + 구조체크 가중치 행(대시보드에서 조정/비활성할 수 있게 행으로 노출). */
+    static List<SpamRuleEntry> seedEntries() {
+        List<SpamRuleEntry> entries = new ArrayList<>(buildDefaultEntries());
+        Object[][] structural = {
+                {"url-raw-ip", 3.0, "URL 호스트가 raw IP"},
+                {"url-punycode-domain", 3.0, "URL이 퓨니코드 도메인"},
+                {"missing-date-header", 1.0, "Date 헤더 누락"},
+                {"missing-message-id", 1.0, "Message-ID 헤더 누락"},
+                {"envelope-header-recipient-mismatch", 1.5, "봉투-헤더 수신자 불일치"},
+                {"link-heavy-html", 1.5, "링크 위주 HTML 본문"},
+                {"subject-all-caps", 2.0, "제목 전체 대문자"},
+                {"subject-excessive-exclamation", 1.5, "느낌표 3개 이상"},
+                {"empty-body", 1.0, "제목은 있는데 본문이 빔"},
+                {"internal-domain-spoof", 5.0, "자사 도메인 사칭(외부 IP 발신) - internal-domains 설정 시에만 동작"},
+        };
+        for (Object[] row : structural) {
+            entries.add(new SpamRuleEntry(null, SpamRuleEntry.RuleType.STRUCTURAL, (String) row[0],
+                    (Double) row[1], true, (String) row[2]));
+        }
+        return entries;
     }
 
     /**
