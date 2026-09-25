@@ -13,6 +13,11 @@ management:
         include: gateway,health
 
 spring:
+  sql:
+    init:
+      # 필수: 기동 스크립트가 --spring.config.location으로 이 파일 하나만 읽으므로 jar 내장 기본값이 적용되지 않는다.
+      # 기본값(embedded)이면 파일 H2에서 schema.sql이 실행되지 않아 테이블 없이(룰 0개로) 기동한다.
+      mode: always
   datasource:
     # 영구 저장(H2 파일 모드): 재기동해도 스팸 룰/화이트-블랙리스트/그레이리스팅/밴 목록이 유지된다.
     # 파일 DB는 한 프로세스만 열 수 있으므로 인스턴스는 1개여야 한다. 여러 인스턴스(SO_REUSEPORT)가
