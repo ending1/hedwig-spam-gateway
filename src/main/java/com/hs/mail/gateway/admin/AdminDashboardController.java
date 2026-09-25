@@ -37,6 +37,13 @@ public class AdminDashboardController {
                 "</head>\n" +
                 "<body>\n" +
                 "<h1>Hedwig Spam Gateway 관리자 대시보드</h1>\n" +
+                "<form id=\"keyForm\" style=\"background:white;padding:0.6rem 1rem;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);margin:0 0 1.5rem\">\n" +
+                "  <label for=\"adminKey\" style=\"font-size:0.85rem;color:#555\">관리자 키</label>\n" +
+                "  <input id=\"adminKey\" type=\"password\" autocomplete=\"off\" placeholder=\"설정된 경우에만 입력\" size=\"28\">\n" +
+                "  <button type=\"submit\">적용</button>\n" +
+                "  <button type=\"button\" id=\"keyClear\" style=\"background:#6b7280\">지우기</button>\n" +
+                "  <span id=\"authStatus\" style=\"font-size:0.85rem\"></span>\n" +
+                "</form>\n" +
                 "<section>\n" +
                 "  <div class=\"cards\" id=\"cards\">불러오는 중...</div>\n" +
                 "</section>\n" +
@@ -76,6 +83,26 @@ public class AdminDashboardController {
                 "  </table>\n" +
                 "</section>\n" +
                 "<script>\n" +
+                "const KEY_STORE = 'hedwigAdminKey';\n" +
+                "function getKey() { try { return sessionStorage.getItem(KEY_STORE) || ''; } catch (e) { return ''; } }\n" +
+                "function setKey(v) { try { if (v) sessionStorage.setItem(KEY_STORE, v); else sessionStorage.removeItem(KEY_STORE); } catch (e) {} }\n" +
+                "function showAuth(msg, bad) {\n" +
+                "  const el = document.getElementById('authStatus');\n" +
+                "  el.textContent = msg; el.style.color = bad ? '#dc2626' : '#16a34a';\n" +
+                "}\n" +
+                "/** /admin/* 호출 공통 래퍼: 저장된 키를 X-Admin-Key로 붙이고, 401이면 안내를 띄운다. */\n" +
+                "async function adminFetch(url, opts) {\n" +
+                "  opts = opts || {};\n" +
+                "  const headers = Object.assign({}, opts.headers || {});\n" +
+                "  if (getKey()) headers['X-Admin-Key'] = getKey();\n" +
+                "  const res = await fetch(url, Object.assign({}, opts, { headers }));\n" +
+                "  if (res.status === 401) {\n" +
+                "    showAuth(getKey() ? '키가 올바르지 않습니다' : '관리자 키가 필요합니다', true);\n" +
+                "  } else if (res.ok && getKey()) {\n" +
+                "    showAuth('키 적용됨', false);\n" +
+                "  }\n" +
+                "  return res;\n" +
+                "}\n" +
                 "async function loadStats() {\n" +
                 "  const res = await fetch('/actuator/gateway');\n" +
                 "  const data = await res.json();\n" +
@@ -96,7 +123,8 @@ public class AdminDashboardController {
                 "    `<div class=\"card\"><h3>${label}</h3><div class=\"value\">${value}</div></div>`).join('');\n" +
                 "}\n" +
                 "async function loadList() {\n" +
-                "  const res = await fetch('/admin/mail-list');\n" +
+                "  const res = await adminFetch('/admin/mail-list');\n" +
+                "  if (!res.ok) { document.querySelector('#listTable tbody').innerHTML = ''; return; }\n" +
                 "  const rows = await res.json();\n" +
                 "  const tbody = document.querySelector('#listTable tbody');\n" +
                 "  tbody.innerHTML = rows.map(r => `<tr>\n" +
@@ -105,12 +133,12 @@ public class AdminDashboardController {
                 "  </tr>`).join('');\n" +
                 "}\n" +
                 "async function removeEntry(listType, pattern, recipient) {\n" +
-                "  await fetch(`/admin/mail-list?listType=${encodeURIComponent(listType)}&pattern=${encodeURIComponent(pattern)}&recipient=${encodeURIComponent(recipient)}`, { method: 'DELETE' });\n" +
+                "  await adminFetch(`/admin/mail-list?listType=${encodeURIComponent(listType)}&pattern=${encodeURIComponent(pattern)}&recipient=${encodeURIComponent(recipient)}`, { method: 'DELETE' });\n" +
                 "  loadList();\n" +
                 "}\n" +
                 "document.getElementById('addForm').addEventListener('submit', async (e) => {\n" +
                 "  e.preventDefault();\n" +
-                "  await fetch('/admin/mail-list', {\n" +
+                "  await adminFetch('/admin/mail-list', {\n" +
                 "    method: 'POST', headers: { 'Content-Type': 'application/json' },\n" +
                 "    body: JSON.stringify({\n" +
                 "      listType: document.getElementById('listType').value,\n" +
@@ -125,7 +153,8 @@ public class AdminDashboardController {
                 "  loadList();\n" +
                 "});\n" +
                 "async function loadRules() {\n" +
-                "  const res = await fetch('/admin/spam-rules');\n" +
+                "  const res = await adminFetch('/admin/spam-rules');\n" +
+                "  if (!res.ok) { document.querySelector('#ruleTable tbody').innerHTML = ''; return; }\n" +
                 "  const rows = await res.json();\n" +
                 "  const tbody = document.querySelector('#ruleTable tbody');\n" +
                 "  tbody.innerHTML = rows.map(r => `<tr>\n" +
@@ -140,19 +169,19 @@ public class AdminDashboardController {
                 "function escapeHtml(s) { const d = document.createElement('div'); d.innerText = s == null ? '' : s; return d.innerHTML; }\n" +
                 "function encodeAttr(s) { return (s == null ? '' : s).replace(/'/g, \"\\\\'\"); }\n" +
                 "async function toggleRule(id, ruleType, pattern, weight, enabled, reason) {\n" +
-                "  await fetch(`/admin/spam-rules/${id}`, {\n" +
+                "  await adminFetch(`/admin/spam-rules/${id}`, {\n" +
                 "    method: 'PUT', headers: { 'Content-Type': 'application/json' },\n" +
                 "    body: JSON.stringify({ ruleType, pattern, weight, enabled, reason })\n" +
                 "  });\n" +
                 "  loadRules();\n" +
                 "}\n" +
                 "async function removeRule(id) {\n" +
-                "  await fetch(`/admin/spam-rules/${id}`, { method: 'DELETE' });\n" +
+                "  await adminFetch(`/admin/spam-rules/${id}`, { method: 'DELETE' });\n" +
                 "  loadRules();\n" +
                 "}\n" +
                 "document.getElementById('ruleAddForm').addEventListener('submit', async (e) => {\n" +
                 "  e.preventDefault();\n" +
-                "  await fetch('/admin/spam-rules', {\n" +
+                "  await adminFetch('/admin/spam-rules', {\n" +
                 "    method: 'POST', headers: { 'Content-Type': 'application/json' },\n" +
                 "    body: JSON.stringify({\n" +
                 "      ruleType: document.getElementById('ruleType').value,\n" +
@@ -165,6 +194,16 @@ public class AdminDashboardController {
                 "  document.getElementById('ruleReason').value = '';\n" +
                 "  loadRules();\n" +
                 "});\n" +
+                "document.getElementById('keyForm').addEventListener('submit', (e) => {\n" +
+                "  e.preventDefault();\n" +
+                "  setKey(document.getElementById('adminKey').value.trim());\n" +
+                "  showAuth('', false); loadList(); loadRules();\n" +
+                "});\n" +
+                "document.getElementById('keyClear').addEventListener('click', () => {\n" +
+                "  setKey(''); document.getElementById('adminKey').value = '';\n" +
+                "  showAuth('키를 지웠습니다', false); loadList(); loadRules();\n" +
+                "});\n" +
+                "document.getElementById('adminKey').value = getKey();\n" +
                 "loadStats(); loadList(); loadRules();\n" +
                 "setInterval(loadStats, 5000);\n" +
                 "</script>\n" +
