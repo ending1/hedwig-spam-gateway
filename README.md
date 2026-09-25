@@ -86,6 +86,13 @@ curl -X DELETE http://localhost:8090/admin/spam-rules/42
 - `GET /admin/dashboard`에서 커넥션/밴/스팸판정/RBL/그레이리스팅/아웃바운드 지표를 5초 주기로 갱신되는 카드로 표시
 - 같은 화면에서 화이트/블랙리스트 추가·삭제도 가능 (별도 프론트엔드 빌드 없이 순수 HTML/JS)
 
+### 8-1. LLM 판정용 RAG (선택, 기본 꺼짐)
+- `gateway.spam-filter.rag.enabled=true` + `examples-file`(JSONL)을 주면, LLM(Gemini/Claude/Gemma) 판정 프롬프트에 **과거에 스팸으로 확인된 유사 사례**(문자 3-gram TF-IDF 검색, 외부 임베딩 API 없음)를 근거로 붙인다. 유사도 `min-similarity` 미만이면 사례를 붙이지 않는다.
+- 사례 파일은 실제 사내 메일에서 파생된 데이터라 저장소/jar에 넣지 않고 서버 외부 파일로만 둔다. `tools/BuildRagExamples.java`로 코퍼스에서 캠페인 중복 제거 후 생성(이메일/긴 숫자열 마스킹), `tools/RagEval.java`로 RAG 유무를 같은 메일로 비교한다.
+- **측정 결과(2026-09-26, 사내 2개월 코퍼스, Gemini 3.5 Flash-Lite)**: 룰이 못 잡은 미사용 스팸 캠페인 200건에서 RAG 없음 89.5~90.0% → RAG 사용 89.0~89.5%로 **차이가 없었다**(두 번 실행). Gemini가 이미 대부분을 잡아 개선 여지가 작았다. 따라서 **기본값은 꺼짐**이고, 켜야 할 근거(자사 정책에 특화된 판정 등)가 생겼을 때 다시 평가해 켠다.
+- 이 수치를 해석할 때의 주의: 코퍼스의 "스팸" 라벨은 노이즈가 크다. Gemini가 "정상"으로 본 20건은 OpenAI/PAYCO 로그인 알림, 뉴스레터, 업무 협조 메일 등 실제로 정상에 가까웠고, "정상 대용"으로 넣은 microsoft.com 발신 중 6건은 실제로는 microsoft.com을 사칭한 피싱("Windows Defender flagged active spyware")이라 Gemini가 정확히 잡은 것이었다. 즉 90%는 실제 재현율의 하한이고 오탐률(9/60)은 신뢰할 수 없다. 발신 도메인만으로 ham 라벨을 붙이면 사칭 메일이 섞인다.
+- 평가 중 발견한 함정: 마케팅 메일이 미리보기 뒤를 채우는 투명 문자(U+034F 등) 패딩 때문에 무관한 메일끼리 유사도 0.6~0.7이 나왔다. 유사도 계산 전 투명 문자를 제거하고 n-gram tf에 상한을 둔다.
+
 ### 9. 아웃바운드 DKIM 서명
 - 이 게이트웨이를 거쳐 나가는 발신 메일에 `DKIM-Signature` 헤더를 추가 (RFC 6376, relaxed/relaxed 정규화, rsa-sha256)
 - 외부 라이브러리 없이 표준 Java 암호화 API만으로 직접 구현

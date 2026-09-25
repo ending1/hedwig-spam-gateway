@@ -14,15 +14,30 @@ public class GemmaOllamaClassifier implements SpamClassifier {
 
     private final GatewayProperties.SpamFilter config;
 
+    private final SpamRagService rag;
+
     public GemmaOllamaClassifier(GatewayProperties.SpamFilter config) {
+        this(config, null);
+    }
+
+    /** rag가 null이거나 비활성이면 사례 없이 기존 프롬프트로 판정한다. */
+    public GemmaOllamaClassifier(GatewayProperties.SpamFilter config, SpamRagService rag) {
         this.config = config;
+        this.rag = rag;
+    }
+
+    private String prompt(SpamCheckRequest request) {
+        if (rag == null || !rag.isActive()) {
+            return SpamPromptBuilder.build(request);
+        }
+        return SpamPromptBuilder.build(request, rag.retrieve(request), rag.maxExampleChars());
     }
 
     @Override
     public SpamVerdict classify(SpamCheckRequest request) throws Exception {
         ObjectNode payload = MAPPER.createObjectNode();
         payload.put("model", config.getGemma().getModel());
-        payload.put("prompt", SpamPromptBuilder.build(request));
+        payload.put("prompt", prompt(request));
         payload.put("stream", false);
         payload.put("format", "json");
 

@@ -449,6 +449,7 @@ public class GatewayProperties {
         private final Gemma gemma = new Gemma();
         private final Gemini gemini = new Gemini();
         private final Claude claude = new Claude();
+        private final Rag rag = new Rag();
 
         public boolean isEnabled() {
             return enabled;
@@ -500,6 +501,64 @@ public class GatewayProperties {
 
         public Claude getClaude() {
             return claude;
+        }
+
+        public Rag getRag() {
+            return rag;
+        }
+
+        /**
+         * LLM 판정 시 과거에 스팸으로 확인된 유사 사례를 검색해 프롬프트에 근거로 넣는다(RAG). 사례 파일은
+         * 실제 사내 메일에서 파생된 데이터라 저장소/jar에 넣지 않고 서버의 외부 파일로만 둔다.
+         */
+        public static class Rag {
+            private boolean enabled = false;
+            /** JSONL(한 줄에 subject/snippet/domain/count). 비어있거나 없으면 RAG는 조용히 비활성. */
+            private String examplesFile = "";
+            private int topK = 3;
+            /** 이 값 미만으로 유사한 사례는 프롬프트에 넣지 않는다(무관한 사례가 판단을 오염시키는 것 방지). */
+            private double minSimilarity = 0.35;
+            private int maxExampleChars = 300;
+
+            public boolean isEnabled() {
+                return enabled;
+            }
+
+            public void setEnabled(boolean enabled) {
+                this.enabled = enabled;
+            }
+
+            public String getExamplesFile() {
+                return examplesFile;
+            }
+
+            public void setExamplesFile(String examplesFile) {
+                this.examplesFile = examplesFile;
+            }
+
+            public int getTopK() {
+                return topK;
+            }
+
+            public void setTopK(int topK) {
+                this.topK = topK;
+            }
+
+            public double getMinSimilarity() {
+                return minSimilarity;
+            }
+
+            public void setMinSimilarity(double minSimilarity) {
+                this.minSimilarity = minSimilarity;
+            }
+
+            public int getMaxExampleChars() {
+                return maxExampleChars;
+            }
+
+            public void setMaxExampleChars(int maxExampleChars) {
+                this.maxExampleChars = maxExampleChars;
+            }
         }
 
         public static class Gemma {

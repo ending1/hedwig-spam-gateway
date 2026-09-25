@@ -20,8 +20,23 @@ public class GeminiClassifier implements SpamClassifier {
 
     private final GatewayProperties.SpamFilter config;
 
+    private final SpamRagService rag;
+
     public GeminiClassifier(GatewayProperties.SpamFilter config) {
+        this(config, null);
+    }
+
+    /** rag가 null이거나 비활성이면 사례 없이 기존 프롬프트로 판정한다. */
+    public GeminiClassifier(GatewayProperties.SpamFilter config, SpamRagService rag) {
         this.config = config;
+        this.rag = rag;
+    }
+
+    private String prompt(SpamCheckRequest request) {
+        if (rag == null || !rag.isActive()) {
+            return SpamPromptBuilder.build(request);
+        }
+        return SpamPromptBuilder.build(request, rag.retrieve(request), rag.maxExampleChars());
     }
 
     @Override
@@ -30,7 +45,7 @@ public class GeminiClassifier implements SpamClassifier {
         ArrayNode contents = payload.putArray("contents");
         ObjectNode content = contents.addObject();
         ArrayNode parts = content.putArray("parts");
-        parts.addObject().put("text", SpamPromptBuilder.build(request));
+        parts.addObject().put("text", prompt(request));
 
         String url = "https://generativelanguage.googleapis.com/v1beta/models/"
                 + config.getGemini().getModel() + ":generateContent?key=" + config.getGemini().getApiKey();

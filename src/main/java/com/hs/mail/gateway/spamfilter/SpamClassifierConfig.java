@@ -9,18 +9,18 @@ import org.springframework.context.annotation.Configuration;
 public class SpamClassifierConfig {
 
     @Bean
-    public SpamClassifier spamClassifier(GatewayProperties properties) {
+    public SpamClassifier spamClassifier(GatewayProperties properties, SpamRagService rag) {
         GatewayProperties.SpamFilter config = properties.getSpamFilter();
         if (!config.isEnabled()) {
             return new NoopSpamClassifier();
         }
         switch (config.getProvider()) {
             case GEMMA_LOCAL:
-                return new GemmaOllamaClassifier(config);
+                return new GemmaOllamaClassifier(config, rag);
             case GEMINI:
-                return new GeminiClassifier(config);
+                return new GeminiClassifier(config, rag);
             case CLAUDE:
-                return new ClaudeClassifier(config);
+                return new ClaudeClassifier(config, rag);
             case NONE:
             default:
                 return new NoopSpamClassifier();

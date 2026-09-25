@@ -17,8 +17,23 @@ public class ClaudeClassifier implements SpamClassifier {
 
     private final GatewayProperties.SpamFilter config;
 
+    private final SpamRagService rag;
+
     public ClaudeClassifier(GatewayProperties.SpamFilter config) {
+        this(config, null);
+    }
+
+    /** rag가 null이거나 비활성이면 사례 없이 기존 프롬프트로 판정한다. */
+    public ClaudeClassifier(GatewayProperties.SpamFilter config, SpamRagService rag) {
         this.config = config;
+        this.rag = rag;
+    }
+
+    private String prompt(SpamCheckRequest request) {
+        if (rag == null || !rag.isActive()) {
+            return SpamPromptBuilder.build(request);
+        }
+        return SpamPromptBuilder.build(request, rag.retrieve(request), rag.maxExampleChars());
     }
 
     @Override
@@ -29,7 +44,7 @@ public class ClaudeClassifier implements SpamClassifier {
         ArrayNode messages = payload.putArray("messages");
         ObjectNode message = messages.addObject();
         message.put("role", "user");
-        message.put("content", SpamPromptBuilder.build(request));
+        message.put("content", prompt(request));
 
         Map<String, String> headers = new HashMap<>();
         headers.put("x-api-key", config.getClaude().getApiKey());
