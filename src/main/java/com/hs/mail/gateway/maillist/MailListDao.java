@@ -19,10 +19,24 @@ public class MailListDao {
             return new MailListEntry(
                     MailListEntry.ListType.valueOf(rs.getString("list_type")),
                     rs.getString("pattern"),
-                    rs.getString("recipient"),
+                    fromDb(rs.getString("recipient")),
                     rs.getString("reason"));
         }
     };
+
+    /**
+     * "모든 수신자"를 빈 문자열로 저장하면 Oracle은 ''를 NULL로 취급해 NOT NULL/PK에 넣을 수 없다.
+     * 그래서 DB에는 센티널 "*"로 저장하고 읽을 때 빈 문자열로 되돌린다(이전 H2 데이터의 ''도 그대로 읽는다).
+     */
+    static final String ALL_RECIPIENTS = "*";
+
+    private static String toDb(String recipient) {
+        return recipient == null || recipient.isEmpty() ? ALL_RECIPIENTS : recipient;
+    }
+
+    private static String fromDb(String recipient) {
+        return recipient == null || ALL_RECIPIENTS.equals(recipient) ? "" : recipient;
+    }
 
     private final JdbcTemplate jdbcTemplate;
     private final GatewaySql sql;
@@ -37,13 +51,16 @@ public class MailListDao {
     }
 
     public void insert(MailListEntry entry) {
-        jdbcTemplate.update(sql.get("maillist.delete"),
-                entry.getListType().name(), entry.getPattern(), entry.getRecipient());
+        delete(entry.getListType(), entry.getPattern(), entry.getRecipient());
         jdbcTemplate.update(sql.get("maillist.insert"),
-                entry.getListType().name(), entry.getPattern(), entry.getRecipient(), entry.getReason());
+                entry.getListType().name(), entry.getPattern(), toDb(entry.getRecipient()), entry.getReason());
     }
 
     public void delete(MailListEntry.ListType listType, String pattern, String recipient) {
-        jdbcTemplate.update(sql.get("maillist.delete"), listType.name(), pattern, recipient == null ? "" : recipient);
+        jdbcTemplate.update(sql.get("maillist.delete"), listType.name(), pattern, toDb(recipient));
+        if (ALL_RECIPIENTS.equals(toDb(recipient))) {
+            // 센티널 도입 전 H2에 저장된 ''(빈 문자열) 행도 함께 지운다.
+            jdbcTemplate.update(sql.get("maillist.delete"), listType.name(), pattern, "");
+        }
     }
 }

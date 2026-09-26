@@ -10,7 +10,6 @@ import org.springframework.stereotype.Repository;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -47,7 +46,7 @@ public class SpamRuleDao {
     public long insert(SpamRuleEntry entry) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         jdbcTemplate.update(con -> {
-            PreparedStatement ps = con.prepareStatement(sql.get("spamrule.insert"), Statement.RETURN_GENERATED_KEYS);
+            PreparedStatement ps = con.prepareStatement(sql.get("spamrule.insert"), new String[] {"ID"});
             ps.setString(1, entry.getRuleType().name());
             ps.setString(2, entry.getPattern());
             ps.setDouble(3, entry.getWeight());

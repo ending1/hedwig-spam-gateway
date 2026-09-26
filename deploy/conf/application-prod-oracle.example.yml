@@ -1,0 +1,22 @@
+# 운영 게이트웨이를 Oracle로 구동하는 예시(application-prod.yml의 datasource/sql 부분만 교체하면 된다).
+# 1) DBA가 src/main/sql/oracle/*.sql 을 검토/적용(테이블 hw_ban_list, hw_greylist, hw_mail_list,
+#    hw_spam_rule, hw_spam_rule_stat, hw_spam_rule_sample + 시퀀스/트리거).
+# 2) 아래 접속 정보를 채운다. 비밀번호는 이 파일(권한 600)에만 두고 저장소에 커밋하지 않는다.
+# 3) 룰 테이블이 비어 있으면 기동 시 기본 룰셋이 자동 시드된다.
+spring:
+  sql:
+    init:
+      mode: never          # 중요: 내장 schema.sql은 H2용이므로 Oracle에서는 실행하지 않는다
+  datasource:
+    url: jdbc:oracle:thin:@//<호스트>:1521/<서비스명>
+    driver-class-name: oracle.jdbc.OracleDriver
+    username: <계정>
+    password: <비밀번호>
+    hikari:
+      maximum-pool-size: 10
+      connection-test-query: SELECT 1 FROM dual
+
+gateway:
+  db-dialect: oracle       # oracle.* SQL이 없는 키는 ansi.* 로 대체된다
+  ban:
+    poll-interval-seconds: 5

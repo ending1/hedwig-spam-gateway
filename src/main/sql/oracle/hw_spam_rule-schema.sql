@@ -3,11 +3,11 @@
 
 CREATE TABLE hw_spam_rule (
   id          NUMBER(19) NOT NULL,
-  rule_type   varchar2(20) NOT NULL,
-  pattern     varchar2(500) NOT NULL,
+  rule_type   varchar2(20 CHAR) NOT NULL,
+  pattern     varchar2(500 CHAR) NOT NULL,
   weight      NUMBER(10,2) DEFAULT 1.0 NOT NULL,
   enabled     NUMBER(1) DEFAULT 1 NOT NULL,
-  reason      varchar2(255),
+  reason      varchar2(255 CHAR),
   created_at  TIMESTAMP NOT NULL,
   CONSTRAINT pk_hw_spam_rule PRIMARY KEY (id)
 );

@@ -4,7 +4,7 @@
 CREATE TABLE hw_ban_list (
   ip           varchar2(45) NOT NULL,
   banned_at    timestamp NOT NULL,
-  reason       varchar2(255),
+  reason       varchar2(255 CHAR),
   expires_at   timestamp NOT NULL,
   CONSTRAINT pk_hw_ban_list PRIMARY KEY (ip)
 );

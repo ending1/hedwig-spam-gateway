@@ -2,7 +2,7 @@
 -- DBA 검토 전 "안" 단계 스크립트. TABLESPACE는 현장 환경에 맞게 조정.
 
 CREATE TABLE hw_greylist (
-  triplet_hash   varchar2(64) NOT NULL,
+  triplet_hash   varchar2(64 CHAR) NOT NULL,
   first_seen_at  timestamp NOT NULL,
   passed_at      timestamp,
   CONSTRAINT pk_hw_greylist PRIMARY KEY (triplet_hash)

@@ -92,6 +92,19 @@
         </dependency>
 
         <!-- 배포 대상 RDBMS 드라이버는 현장 설치 시 선택 적용. H2는 테스트/빠른 기동(dev) 겸용으로 runtime 포함. -->
+        <!-- Hedwig 본체와 같은 버전. 접속 대상 DB는 gateway.db-dialect(ansi|oracle|mariadb)와 spring.datasource.* 로 선택. -->
+        <dependency>
+            <groupId>com.oracle.database.jdbc</groupId>
+            <artifactId>ojdbc8</artifactId>
+            <version>21.17.0.0</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mariadb.jdbc</groupId>
+            <artifactId>mariadb-java-client</artifactId>
+            <version>2.7.2</version>
+            <scope>runtime</scope>
+        </dependency>
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
