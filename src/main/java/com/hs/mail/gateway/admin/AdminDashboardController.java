@@ -81,7 +81,7 @@ public class AdminDashboardController {
                 "    <thead><tr><th>ID</th><th>유형</th><th>패턴</th><th>가중치</th><th>적중(스팸판정)</th><th>상태</th><th>설명</th><th></th></tr></thead>\n" +
                 "    <tbody></tbody>\n" +
                 "  </table>\n" +
-                "  <div id=\"advicePanel\" style=\"display:none;margin-top:1rem;padding:1rem;background:#f8fafc;border:1px solid #cbd5e1;border-radius:8px\"></div>\n" +
+                "  <div id=\"advicePanel\" style=\"display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;align-items:center;justify-content:center\"><div id=\"adviceBox\" style=\"background:white;padding:1.5rem;border-radius:10px;max-width:640px;width:90%;max-height:80vh;overflow:auto;box-shadow:0 10px 30px rgba(0,0,0,0.3)\"></div></div>\n" +
                 "</section>\n" +
                 "<script>\n" +
                 "const KEY_STORE = 'hedwigAdminKey';\n" +
@@ -177,9 +177,9 @@ public class AdminDashboardController {
                 "let ruleById = {};\n" +
                 "/** 룰 적중 샘플을 보여주고 LLM 조언을 받아 패널에 표시한다. 적용은 관리자가 버튼으로 직접 한다. */\n" +
                 "async function analyzeRule(id) {\n" +
-                "  const panel = document.getElementById('advicePanel');\n" +
+                "  const overlay = document.getElementById('advicePanel'); const panel = document.getElementById('adviceBox');\n" +
                 "  const r = ruleById[id];\n" +
-                "  panel.style.display = 'block';\n" +
+                "  overlay.style.display = 'flex'; overlay.onclick = (e) => { if (e.target === overlay) overlay.style.display = 'none'; };\n" +
                 "  panel.innerHTML = '분석 중... (LLM 호출, 수 초 걸릴 수 있음)';\n" +
                 "  let html = `<b>룰 #${id}</b> ${escapeHtml(r.pattern)} (현재 가중치 ${r.weight})<br>`;\n" +
                 "  const sres = await adminFetch(`/admin/spam-rules/${id}/samples`);\n" +
@@ -189,18 +189,18 @@ public class AdminDashboardController {
                 "  }\n" +
                 "  const ares = await adminFetch(`/admin/spam-rules/${id}/advice`, { method: 'POST' });\n" +
                 "  const body = await ares.json();\n" +
-                "  if (!ares.ok) { panel.innerHTML = html + `<p style=\"color:#dc2626\">${escapeHtml(body.error || '조언을 받지 못했습니다')}</p>`; return; }\n" +
+                "  if (!ares.ok) { panel.innerHTML = html + `<p style=\"color:#dc2626\">${escapeHtml(body.error || '조언을 받지 못했습니다')}</p><button onclick=\"document.getElementById('advicePanel').style.display='none'\">닫기</button>`; return; }\n" +
                 "  const actionKo = { KEEP: '유지', RAISE: '상향', LOWER: '하향', DISABLE: '비활성화' }[body.action] || body.action;\n" +
                 "  html += `<p><b>LLM 조언(참고용)</b>: ${actionKo}` + (body.recommendedWeight != null ? ` → 권장 가중치 ${body.recommendedWeight}` : '') + ` (신뢰도 ${body.confidence}, 적중 ${body.hits}건)<br>${escapeHtml(body.rationale)}</p>`;\n" +
                 "  html += '<button id=\"applyAdvice\">권장 가중치 적용</button> <button id=\"closeAdvice\" style=\"background:#6b7280\">닫기</button>';\n" +
                 "  panel.innerHTML = html;\n" +
-                "  document.getElementById('closeAdvice').onclick = () => { panel.style.display = 'none'; };\n" +
+                "  document.getElementById('closeAdvice').onclick = () => { overlay.style.display = 'none'; };\n" +
                 "  document.getElementById('applyAdvice').onclick = async () => {\n" +
                 "    const w = body.action === 'DISABLE' ? r.weight : body.recommendedWeight;\n" +
                 "    if (w == null) { alert('권장 가중치가 없습니다'); return; }\n" +
                 "    if (!confirm(`룰 #${id}를 ` + (body.action === 'DISABLE' ? '비활성화' : `가중치 ${w}로 변경`) + '합니다. 진행할까요?')) return;\n" +
                 "    await toggleRule(id, r.ruleType, r.pattern, w, body.action === 'DISABLE' ? false : r.enabled, r.reason || '');\n" +
-                "    panel.style.display = 'none';\n" +
+                "    overlay.style.display = 'none';\n" +
                 "  };\n" +
                 "}\n" +
                 "async function toggleRule(id, ruleType, pattern, weight, enabled, reason) {\n" +
