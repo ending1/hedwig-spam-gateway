@@ -83,6 +83,14 @@ public class AdminDashboardController {
                 "  </table>\n" +
                 "  <div id=\"advicePanel\" style=\"display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;align-items:center;justify-content:center\"><div id=\"adviceBox\" style=\"background:white;padding:1.5rem;border-radius:10px;max-width:640px;width:90%;max-height:80vh;overflow:auto;box-shadow:0 10px 30px rgba(0,0,0,0.3)\"></div></div>\n" +
                 "</section>\n" +
+                "<section>\n" +
+                "  <h2>사용자 스팸 신고 (LLM 판정)</h2>\n" +
+                "  <p style=\"font-size:0.85rem;color:#555\">신고 → LLM이 판정/의견 → 확신도 높은 스팸은 RAG 사례로 자동 편입 → 룰 추가는 여기서 승인해야 반영됩니다.</p>\n" +
+                "  <table id=\"reportTable\">\n" +
+                "    <thead><tr><th>ID</th><th>신고자</th><th>발신 도메인</th><th>제목 / 본문 일부</th><th>LLM 판정</th><th>의견</th><th>제안 룰</th><th>상태</th><th>RAG</th><th></th></tr></thead>\n" +
+                "    <tbody></tbody>\n" +
+                "  </table>\n" +
+                "</section>\n" +
                 "<script>\n" +
                 "const KEY_STORE = 'hedwigAdminKey';\n" +
                 "function getKey() { try { return sessionStorage.getItem(KEY_STORE) || ''; } catch (e) { return ''; } }\n" +
@@ -203,6 +211,47 @@ public class AdminDashboardController {
                 "    overlay.style.display = 'none';\n" +
                 "  };\n" +
                 "}\n" +
+                "async function loadReports() {\n" +
+                "  const tbody = document.querySelector('#reportTable tbody');\n" +
+                "  const res = await adminFetch('/admin/spam-reports');\n" +
+                "  if (!res.ok) { tbody.innerHTML = ''; return; }\n" +
+                "  const rows = await res.json();\n" +
+                "  window.reportById = {}; rows.forEach(r => { window.reportById[r.id] = r; });\n" +
+                "  const vk = { SPAM: '스팸', HAM: '정상', UNSURE: '불확실' };\n" +
+                "  tbody.innerHTML = rows.map(r => `<tr>\n" +
+                "    <td>${r.id}</td><td>${escapeHtml(r.reporter)}</td><td>${escapeHtml(r.fromDomain)}</td>\n" +
+                "    <td><b>${escapeHtml(r.subject)}</b><br><span style=\"color:#555\">${escapeHtml((r.snippet || '').substring(0, 120))}</span></td>\n" +
+                "    <td>${r.status === 'PENDING' ? '분석 중' : (vk[r.verdict] || '-') + ' (' + Math.round((r.score || 0) * 100) + '%)'}</td>\n" +
+                "    <td>${escapeHtml(r.reason || '')}</td>\n" +
+                "    <td>${r.suggestedPattern ? '<code>' + escapeHtml(r.suggestedPattern) + '</code> (' + r.suggestedWeight + ')' : '-'}</td>\n" +
+                "    <td>${{ PENDING: '분석 중', ANALYZED: '검토 대기', RULE_APPROVED: '룰 추가됨', DISMISSED: '기각' }[r.status] || r.status}</td>\n" +
+                "    <td>${r.ragAdded ? '사용 중' : '-'}</td>\n" +
+                "    <td>\n" +
+                "      <button data-act=\"approve\" data-id=\"${r.id}\">룰 추가</button>\n" +
+                "      <button data-act=\"rag\" data-id=\"${r.id}\">${r.ragAdded ? 'RAG 제외' : 'RAG 추가'}</button>\n" +
+                "      <button class=\"danger\" data-act=\"dismiss\" data-id=\"${r.id}\">기각</button>\n" +
+                "    </td>\n" +
+                "  </tr>`).join('');\n" +
+                "}\n" +
+                "document.querySelector('#reportTable tbody').addEventListener('click', async (e) => {\n" +
+                "  const btn = e.target.closest('button[data-act]'); if (!btn) return;\n" +
+                "  const id = btn.dataset.id; const r = window.reportById[id];\n" +
+                "  if (btn.dataset.act === 'approve') {\n" +
+                "    const pattern = prompt('추가할 키워드 룰(정규식). LLM 제안값을 고치거나 직접 입력하세요.', r.suggestedPattern || '');\n" +
+                "    if (!pattern) return;\n" +
+                "    const w = parseFloat(prompt('가중치(임계치 5 기준, 단독으로 스팸 처리하려면 5 이상)', r.suggestedWeight > 0 ? r.suggestedWeight : 2));\n" +
+                "    if (isNaN(w)) return;\n" +
+                "    const res = await adminFetch(`/admin/spam-reports/${id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pattern, weight: w }) });\n" +
+                "    if (!res.ok) { const b = await res.json(); alert(b.error || '룰을 추가하지 못했습니다'); return; }\n" +
+                "    loadRules();\n" +
+                "  } else if (btn.dataset.act === 'rag') {\n" +
+                "    await adminFetch(`/admin/spam-reports/${id}/rag`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on: !r.ragAdded }) });\n" +
+                "  } else if (btn.dataset.act === 'dismiss') {\n" +
+                "    if (!confirm('이 신고를 기각합니다(RAG 사례에서도 제외됩니다). 진행할까요?')) return;\n" +
+                "    await adminFetch(`/admin/spam-reports/${id}/dismiss`, { method: 'POST' });\n" +
+                "  }\n" +
+                "  loadReports();\n" +
+                "});\n" +
                 "async function toggleRule(id, ruleType, pattern, weight, enabled, reason) {\n" +
                 "  await adminFetch(`/admin/spam-rules/${id}`, {\n" +
                 "    method: 'PUT', headers: { 'Content-Type': 'application/json' },\n" +
@@ -232,14 +281,14 @@ public class AdminDashboardController {
                 "document.getElementById('keyForm').addEventListener('submit', (e) => {\n" +
                 "  e.preventDefault();\n" +
                 "  setKey(document.getElementById('adminKey').value.trim());\n" +
-                "  showAuth('', false); loadList(); loadRules();\n" +
+                "  showAuth('', false); loadList(); loadRules(); loadReports();\n" +
                 "});\n" +
                 "document.getElementById('keyClear').addEventListener('click', () => {\n" +
                 "  setKey(''); document.getElementById('adminKey').value = '';\n" +
-                "  showAuth('키를 지웠습니다', false); loadList(); loadRules();\n" +
+                "  showAuth('키를 지웠습니다', false); loadList(); loadRules(); loadReports();\n" +
                 "});\n" +
                 "document.getElementById('adminKey').value = getKey();\n" +
-                "loadStats(); loadList(); loadRules();\n" +
+                "loadStats(); loadList(); loadRules(); loadReports(); loadReports();\n" +
                 "setInterval(loadStats, 5000);\n" +
                 "</script>\n" +
                 "</body>\n" +

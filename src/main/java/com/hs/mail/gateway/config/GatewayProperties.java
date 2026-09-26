@@ -798,6 +798,16 @@ public class GatewayProperties {
     /** 관리자 REST API(/admin/*) 접근 제어. api-key가 비어있으면 인증 없이 열려있다 (개발용 기본값). */
     public static class Admin {
         private String apiKey;
+        /** 스팸 신고 접수(POST /report)용 별도 키. 그룹웨어가 이 키만 갖고 신고를 전달한다. 비어 있으면 admin 키로만 접수. */
+        private String reportApiKey;
+
+        public String getReportApiKey() {
+            return reportApiKey;
+        }
+
+        public void setReportApiKey(String reportApiKey) {
+            this.reportApiKey = reportApiKey;
+        }
 
         public String getApiKey() {
             return apiKey;

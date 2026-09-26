@@ -129,6 +129,10 @@ public final class SpamExampleIndex {
         return new SpamExampleIndex(Collections.unmodifiableList(new ArrayList<>(examples)));
     }
 
+    public List<Example> getExamples() {
+        return examples;
+    }
+
     public int size() {
         return examples.size();
     }

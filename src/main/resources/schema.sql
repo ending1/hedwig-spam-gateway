@@ -50,3 +50,19 @@ CREATE TABLE IF NOT EXISTS hw_spam_rule_sample (
     spam_verdict BOOLEAN NOT NULL,
     created_at TIMESTAMP NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS hw_spam_report (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    reporter VARCHAR(100),
+    from_domain VARCHAR(255),
+    subject VARCHAR(200),
+    snippet VARCHAR(500),
+    status VARCHAR(20) NOT NULL,
+    llm_verdict VARCHAR(10),
+    llm_score DOUBLE DEFAULT 0,
+    llm_reason VARCHAR(1000),
+    suggested_pattern VARCHAR(500),
+    suggested_weight DOUBLE DEFAULT 0,
+    rag_added BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL
+);
