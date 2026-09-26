@@ -1,0 +1,19 @@
+# 운영 게이트웨이를 MariaDB로 구동하는 예시(application-prod.yml의 datasource/sql 부분만 교체).
+# 1) DBA가 src/main/sql/mariadb/*.sql 을 검토/적용한다. 테이블명은 소문자 hw_* (리눅스는 대소문자 구분).
+#    DB 문자셋은 utf8mb4 권장.
+# 2) 접속 정보를 채운다. 비밀번호는 이 파일(권한 600)에만 두고 저장소에 커밋하지 않는다.
+# 3) 룰 테이블이 비어 있으면 기동 시 기본 룰셋이 자동 시드된다.
+spring:
+  sql:
+    init:
+      mode: never          # 중요: 내장 schema.sql은 H2용이므로 실행하지 않는다
+  datasource:
+    url: jdbc:mariadb://<호스트>:3306/<DB명>?useUnicode=true&characterEncoding=utf8
+    driver-class-name: org.mariadb.jdbc.Driver
+    username: <계정>
+    password: <비밀번호>
+    hikari:
+      maximum-pool-size: 10
+
+gateway:
+  db-dialect: mariadb      # mariadb.* SQL이 없는 키는 ansi.* 로 대체된다
