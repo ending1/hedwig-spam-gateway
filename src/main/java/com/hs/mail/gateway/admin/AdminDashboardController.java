@@ -33,6 +33,13 @@ public class AdminDashboardController {
                 "  button { padding: 0.4rem 0.9rem; border: none; border-radius: 4px; background: #2563eb; color: white; cursor: pointer; }\n" +
                 "  button.danger { background: #dc2626; }\n" +
                 "  section { margin-bottom: 2rem; }\n" +
+                "  .tabs { display: flex; gap: 0.25rem; border-bottom: 2px solid #e5e7eb; margin: 0 0 1.25rem; }\n" +
+                "  .tab { background: transparent; color: #555; border-radius: 6px 6px 0 0; padding: 0.6rem 1.1rem; font-size: 0.95rem; border-bottom: 3px solid transparent; margin-bottom: -2px; }\n" +
+                "  .tab:hover { background: #eef2ff; }\n" +
+                "  .tab.active { color: #1d4ed8; font-weight: 700; border-bottom-color: #2563eb; background: white; }\n" +
+                "  .tab .badge { color: #dc2626; font-weight: 700; }\n" +
+                "  .tab-panel { display: none; }\n" +
+                "  .tab-panel.active { display: block; }\n" +
                 "</style>\n" +
                 "</head>\n" +
                 "<body>\n" +
@@ -47,7 +54,12 @@ public class AdminDashboardController {
                 "<section>\n" +
                 "  <div class=\"cards\" id=\"cards\">불러오는 중...</div>\n" +
                 "</section>\n" +
-                "<section>\n" +
+                "<nav class=\"tabs\" id=\"tabs\">\n" +
+                "  <button class=\"tab\" data-tab=\"rules\">룰 관리</button>\n" +
+                "  <button class=\"tab\" data-tab=\"reports\">스팸 신고<span class=\"badge\" id=\"badgeReports\"></span></button>\n" +
+                "  <button class=\"tab\" data-tab=\"lists\">화이트/블랙리스트</button>\n" +
+                "</nav>\n" +
+                "<section class=\"tab-panel\" id=\"tab-lists\">\n" +
                 "  <h2>화이트/블랙리스트</h2>\n" +
                 "  <form id=\"addForm\">\n" +
                 "    <select id=\"listType\"><option value=\"WHITE\">화이트리스트</option><option value=\"BLACK\">블랙리스트</option></select>\n" +
@@ -61,7 +73,7 @@ public class AdminDashboardController {
                 "    <tbody></tbody>\n" +
                 "  </table>\n" +
                 "</section>\n" +
-                "<section>\n" +
+                "<section class=\"tab-panel\" id=\"tab-rules\">\n" +
                 "  <h2>룰기반 스팸 필터 - 룰 관리</h2>\n" +
                 "  <p style=\"color:#666;font-size:0.85rem;margin-top:-0.5rem\">키워드(정규식)/브랜드 사칭/프리메일 도메인/URL 단축서비스/구조체크 가중치를 재빌드 없이 여기서 바로 추가·수정·삭제합니다.</p>\n" +
                 "  <form id=\"ruleAddForm\">\n" +
@@ -83,7 +95,7 @@ public class AdminDashboardController {
                 "  </table>\n" +
                 "  <div id=\"advicePanel\" style=\"display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;align-items:center;justify-content:center\"><div id=\"adviceBox\" style=\"background:white;padding:1.5rem;border-radius:10px;max-width:640px;width:90%;max-height:80vh;overflow:auto;box-shadow:0 10px 30px rgba(0,0,0,0.3)\"></div></div>\n" +
                 "</section>\n" +
-                "<section>\n" +
+                "<section class=\"tab-panel\" id=\"tab-reports\">\n" +
                 "  <h2>사용자 스팸 신고 (LLM 판정)</h2>\n" +
                 "  <p style=\"font-size:0.85rem;color:#555\">신고 → LLM이 판정/의견 → 확신도 높은 스팸은 RAG 사례로 자동 편입 → 룰 추가는 여기서 승인해야 반영됩니다.</p>\n" +
                 "  <table id=\"reportTable\">\n" +
@@ -183,6 +195,16 @@ public class AdminDashboardController {
                 "function escapeHtml(s) { const d = document.createElement('div'); d.innerText = s == null ? '' : s; return d.innerHTML; }\n" +
                 "function encodeAttr(s) { return (s == null ? '' : s).replace(/'/g, \"\\\\'\"); }\n" +
                 "let ruleById = {};\n" +
+                "const TAB_STORE = 'hedwigDashTab';\n" +
+                "function showTab(name) {\n" +
+                "  if (!document.getElementById('tab-' + name)) name = 'rules';\n" +
+                "  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));\n" +
+                "  document.querySelectorAll('#tabs .tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));\n" +
+                "  try { sessionStorage.setItem(TAB_STORE, name); } catch (e) {}\n" +
+                "}\n" +
+                "document.getElementById('tabs').addEventListener('click', (e) => {\n" +
+                "  const b = e.target.closest('.tab'); if (b) showTab(b.dataset.tab);\n" +
+                "});\n" +
                 "/** 룰 적중 샘플을 보여주고 LLM 조언을 받아 패널에 표시한다. 적용은 관리자가 버튼으로 직접 한다. */\n" +
                 "async function analyzeRule(id) {\n" +
                 "  const overlay = document.getElementById('advicePanel'); const panel = document.getElementById('adviceBox');\n" +
@@ -217,6 +239,8 @@ public class AdminDashboardController {
                 "  if (!res.ok) { tbody.innerHTML = ''; return; }\n" +
                 "  const rows = await res.json();\n" +
                 "  window.reportById = {}; rows.forEach(r => { window.reportById[r.id] = r; });\n" +
+                "  const waiting = rows.filter(r => r.status === 'ANALYZED').length;\n" +
+                "  document.getElementById('badgeReports').textContent = waiting ? ' (' + waiting + ')' : '';\n" +
                 "  const vk = { SPAM: '스팸', HAM: '정상', UNSURE: '불확실' };\n" +
                 "  tbody.innerHTML = rows.map(r => `<tr>\n" +
                 "    <td>${r.id}</td><td>${escapeHtml(r.reporter)}</td><td>${escapeHtml(r.fromDomain)}</td>\n" +
@@ -288,7 +312,9 @@ public class AdminDashboardController {
                 "  showAuth('키를 지웠습니다', false); loadList(); loadRules(); loadReports();\n" +
                 "});\n" +
                 "document.getElementById('adminKey').value = getKey();\n" +
-                "loadStats(); loadList(); loadRules(); loadReports(); loadReports();\n" +
+                "let savedTab = 'rules'; try { savedTab = sessionStorage.getItem(TAB_STORE) || 'rules'; } catch (e) {}\n" +
+                "showTab(savedTab);\n" +
+                "loadStats(); loadList(); loadRules(); loadReports();\n" +
                 "setInterval(loadStats, 5000);\n" +
                 "</script>\n" +
                 "</body>\n" +
