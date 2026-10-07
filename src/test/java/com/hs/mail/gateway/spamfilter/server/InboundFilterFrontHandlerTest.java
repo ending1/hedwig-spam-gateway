@@ -29,6 +29,7 @@ import org.junit.jupiter.api.Test;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
@@ -117,7 +118,7 @@ class InboundFilterFrontHandlerTest {
     private List<String> runTransaction() throws Exception {
         try (Socket socket = new Socket("127.0.0.1", gatewayPort)) {
             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-            PrintWriter out = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8);
+            PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
 
             List<String> responses = new ArrayList<>();
             in.readLine(); // 초기 220 배너 소비 (읽지 않으면 이후 모든 응답이 한 칸씩 밀려 매칭됨)
@@ -181,7 +182,7 @@ class InboundFilterFrontHandlerTest {
 
         try (Socket socket = new Socket("127.0.0.1", gatewayPort)) {
             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-            PrintWriter out = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8);
+            PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
 
             in.readLine(); // 배너
             out.print("EHLO client\r\n"); out.flush(); in.readLine();
@@ -199,7 +200,7 @@ class InboundFilterFrontHandlerTest {
 
         try (Socket socket = new Socket("127.0.0.1", gatewayPort)) {
             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-            PrintWriter out = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8);
+            PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
 
             in.readLine();
             out.print("EHLO client\r\n"); out.flush(); in.readLine();
@@ -223,7 +224,7 @@ class InboundFilterFrontHandlerTest {
 
         try (Socket socket = new Socket("127.0.0.1", gatewayPort)) {
             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
-            PrintWriter out = new PrintWriter(socket.getOutputStream(), true, StandardCharsets.UTF_8);
+            PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
 
             in.readLine();
             out.print("EHLO client\r\n"); out.flush(); in.readLine();
@@ -305,7 +306,7 @@ class InboundFilterFrontHandlerTest {
         private void run() {
             try (Socket client = serverSocket.accept()) {
                 BufferedReader in = new BufferedReader(new InputStreamReader(client.getInputStream(), StandardCharsets.UTF_8));
-                PrintWriter out = new PrintWriter(client.getOutputStream(), true, StandardCharsets.UTF_8);
+                PrintWriter out = new PrintWriter(new OutputStreamWriter(client.getOutputStream(), StandardCharsets.UTF_8), true);
                 out.print("220 fake-hedwig ready\r\n"); out.flush();
 
                 String line;
