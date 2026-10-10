@@ -2,12 +2,14 @@ package com.hs.mail.gateway.admin;
 
 import com.hs.mail.gateway.spamfilter.SpamReport;
 import com.hs.mail.gateway.spamfilter.SpamReportService;
+import com.hs.mail.gateway.spamfilter.SpamReportSettings;
 import com.hs.mail.gateway.spamfilter.SpamRuleEntry;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
@@ -121,6 +123,57 @@ public class SpamReportController {
         }
         service.setRag(id, Boolean.TRUE.equals(body.get("on")));
         return ResponseEntity.noContent().build();
+    }
+
+    /** 처리 방식(수동/자동)과 자동 처리 기준. */
+    @GetMapping("/admin/spam-reports/settings")
+    public ResponseEntity<?> getSettings(@RequestHeader(value = "X-Admin-Key", required = false) String adminKey) {
+        if (!guard.isAuthorized(adminKey)) {
+            return error(HttpStatus.UNAUTHORIZED, "invalid X-Admin-Key");
+        }
+        return ResponseEntity.ok(settingsMap());
+    }
+
+    /** body(모두 선택): autoProcess, autoMinConfidence, autoMaxWeight, autoMaxPerDay, autoDismissHam. 보낸 항목만 바꾼다. */
+    @PutMapping("/admin/spam-reports/settings")
+    public ResponseEntity<?> putSettings(@RequestHeader(value = "X-Admin-Key", required = false) String adminKey,
+                                          @RequestBody Map<String, Object> body) {
+        if (!guard.isAuthorized(adminKey)) {
+            return error(HttpStatus.UNAUTHORIZED, "invalid X-Admin-Key");
+        }
+        service.getSettings().update(
+                body.get("autoProcess") instanceof Boolean ? (Boolean) body.get("autoProcess") : null,
+                body.get("autoMinConfidence") instanceof Number ? ((Number) body.get("autoMinConfidence")).doubleValue() : null,
+                body.get("autoMaxWeight") instanceof Number ? ((Number) body.get("autoMaxWeight")).doubleValue() : null,
+                body.get("autoMaxPerDay") instanceof Number ? ((Number) body.get("autoMaxPerDay")).intValue() : null,
+                body.get("autoDismissHam") instanceof Boolean ? (Boolean) body.get("autoDismissHam") : null);
+        return ResponseEntity.ok(settingsMap());
+    }
+
+    /** 저장된(마스킹된) 신고 내용을 LLM으로 다시 분석한다. 관리자 판단을 돕는 용도이며 자동 처리는 하지 않는다. */
+    @PostMapping("/admin/spam-reports/{id}/reanalyze")
+    public ResponseEntity<?> reanalyze(@RequestHeader(value = "X-Admin-Key", required = false) String adminKey,
+                                        @PathVariable long id) {
+        if (!guard.isAuthorized(adminKey)) {
+            return error(HttpStatus.UNAUTHORIZED, "invalid X-Admin-Key");
+        }
+        try {
+            service.reanalyze(id);
+        } catch (IllegalArgumentException e) {
+            return error(service.get(id) == null ? HttpStatus.NOT_FOUND : HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+        return ResponseEntity.ok(toMap(service.get(id)));
+    }
+
+    private Map<String, Object> settingsMap() {
+        SpamReportSettings st = service.getSettings();
+        Map<String, Object> m = new LinkedHashMap<>();
+        m.put("autoProcess", st.isAutoProcess());
+        m.put("autoMinConfidence", st.getAutoMinConfidence());
+        m.put("autoMaxWeight", st.getAutoMaxWeight());
+        m.put("autoMaxPerDay", st.getAutoMaxPerDay());
+        m.put("autoDismissHam", st.isAutoDismissHam());
+        return m;
     }
 
     private static String str(Object o) {

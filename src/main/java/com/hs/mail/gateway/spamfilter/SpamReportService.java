@@ -42,6 +42,7 @@ public class SpamReportService {
     private final SpamRagService ragService;
     private final ObjectProvider<SpamClassifier> classifierProvider;
     private final GatewayProperties properties;
+    private final SpamReportSettings settings;
     private final ExecutorService executor = new ThreadPoolExecutor(1, 1, 0L, TimeUnit.MILLISECONDS,
             new ArrayBlockingQueue<Runnable>(100), r -> {
                 Thread t = new Thread(r, "spam-report-analyzer");
@@ -49,9 +50,16 @@ public class SpamReportService {
                 return t;
             });
 
-    @Autowired
     public SpamReportService(SpamReportDao dao, SpamRuleService ruleService, SpamRagService ragService,
                              ObjectProvider<SpamClassifier> classifierProvider, GatewayProperties properties) {
+        this(dao, ruleService, ragService, classifierProvider, properties, new SpamReportSettings(properties));
+    }
+
+    @Autowired
+    public SpamReportService(SpamReportDao dao, SpamRuleService ruleService, SpamRagService ragService,
+                             ObjectProvider<SpamClassifier> classifierProvider, GatewayProperties properties,
+                             SpamReportSettings settings) {
+        this.settings = settings;
         this.dao = dao;
         this.ruleService = ruleService;
         this.ragService = ragService;
@@ -84,6 +92,11 @@ public class SpamReportService {
     }
 
     void analyze(long id, String domain, String subject, String snippet) {
+        analyze(id, domain, subject, snippet, true);
+    }
+
+    /** autoApply=false면 자동 처리 옵션이 켜져 있어도 판정만 갱신한다(관리자 재분석용). */
+    void analyze(long id, String domain, String subject, String snippet, boolean autoApply) {
         try {
             SpamClassifier classifier = classifierProvider.getIfAvailable();
             if (!(classifier instanceof TextCompleter)) {
@@ -99,6 +112,9 @@ public class SpamReportService {
             if (rag) {
                 syncRag();
             }
+            if (autoApply && settings.isAutoProcess()) {
+                autoProcess(id, a, subject, snippet);
+            }
         } catch (Exception e) {
             log.warn("스팸 신고 #{} LLM 판정 실패: {}", id, e.getMessage());
             try {
@@ -107,6 +123,81 @@ public class SpamReportService {
                 // 다음 조회 때 PENDING으로 남아 있어 관리자가 알 수 있다.
             }
         }
+    }
+
+    /**
+     * 자동 처리: LLM 확신도가 기준 이상일 때만 관리자 승인 없이 처리한다. 신고 본문은 외부 텍스트라 LLM 제안이
+     * 조작됐을 수 있으므로 (1) 정규식이 안전해야 하고 (2) 신고된 메일 자체에 실제로 매칭돼야 하며
+     * (3) 가중치 상한과 하루 추가 개수 상한을 둔다. 조건에 못 미치면 ANALYZED로 남아 관리자가 수동 검토한다.
+     */
+    private void autoProcess(long id, Analysis a, String subject, String snippet) {
+        if (a.confidence < settings.getAutoMinConfidence()) {
+            return;
+        }
+        if ("HAM".equals(a.verdict)) {
+            if (settings.isAutoDismissHam()) {
+                dao.updateStatus(id, SpamReport.AUTO_DISMISSED);
+                dao.updateRag(id, false);
+                syncRag();
+                log.info("스팸 신고 #{} 자동 기각(정상 판정 {}%)", id, Math.round(a.confidence * 100));
+            }
+            return;
+        }
+        if (!"SPAM".equals(a.verdict) || a.suggestedPattern == null || !isSafePattern(a.suggestedPattern)) {
+            return;
+        }
+        String sample = (subject == null ? "" : subject) + " " + (snippet == null ? "" : snippet);
+        if (!Pattern.compile(a.suggestedPattern, Pattern.CASE_INSENSITIVE).matcher(sample).find()) {
+            log.info("스팸 신고 #{} 자동 처리 보류: 제안 룰이 신고된 메일에 매칭되지 않음", id);
+            return;
+        }
+        if (autoApprovedInLastDay() >= settings.getAutoMaxPerDay()) {
+            log.warn("스팸 신고 #{} 자동 처리 보류: 24시간 자동 추가 상한({}) 도달", id, settings.getAutoMaxPerDay());
+            return;
+        }
+        boolean exists = false;
+        for (SpamRuleEntry r : ruleService.list()) {
+            if (r.getRuleType() == SpamRuleEntry.RuleType.KEYWORD && a.suggestedPattern.equals(r.getPattern())) {
+                exists = true;
+                break;
+            }
+        }
+        if (!exists) {
+            double w = a.suggestedWeight > 0 ? a.suggestedWeight : 2.0;
+            w = Math.min(w, settings.getAutoMaxWeight());
+            ruleService.add(new SpamRuleEntry(null, SpamRuleEntry.RuleType.KEYWORD, a.suggestedPattern, w, true,
+                    "사용자 신고 #" + id + " 자동 처리(LLM 확신도 " + Math.round(a.confidence * 100) + "%)"));
+        }
+        dao.updateStatus(id, SpamReport.AUTO_APPROVED);
+        log.info("스팸 신고 #{} 자동 처리: 룰 {}", id, exists ? "이미 있음" : "추가");
+    }
+
+    private int autoApprovedInLastDay() {
+        long since = System.currentTimeMillis() - TimeUnit.DAYS.toMillis(1);
+        int n = 0;
+        for (SpamReport r : dao.findRecent(MAX_LIST)) {
+            if (SpamReport.AUTO_APPROVED.equals(r.getStatus()) && r.getCreatedAtMillis() >= since) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /** 관리자 요청으로 저장된(마스킹된) 내용을 LLM으로 다시 분석한다. 처리 방식과 무관하게 자동 처리는 하지 않는다. */
+    public void reanalyze(long id) {
+        SpamReport r = dao.find(id);
+        if (r == null) {
+            throw new IllegalArgumentException("신고를 찾을 수 없습니다: " + id);
+        }
+        if (SpamReport.RULE_APPROVED.equals(r.getStatus()) || SpamReport.AUTO_APPROVED.equals(r.getStatus())
+                || SpamReport.DISMISSED.equals(r.getStatus()) || SpamReport.AUTO_DISMISSED.equals(r.getStatus())) {
+            throw new IllegalArgumentException("이미 처리된 신고입니다");
+        }
+        analyze(id, r.getFromDomain(), r.getSubject(), r.getSnippet(), false);
+    }
+
+    public SpamReportSettings getSettings() {
+        return settings;
     }
 
     String buildPrompt(String domain, String subject, String snippet) {

@@ -31,6 +31,7 @@ public class GatewayProperties {
     private final MailList mailList = new MailList();
     private final RuleFilter ruleFilter = new RuleFilter();
     private final Admin admin = new Admin();
+    private final SpamReportOptions spamReport = new SpamReportOptions();
 
     public int getListenPort() {
         return listenPort;
@@ -110,6 +111,10 @@ public class GatewayProperties {
 
     public Admin getAdmin() {
         return admin;
+    }
+
+    public SpamReportOptions getSpamReport() {
+        return spamReport;
     }
 
     public static class RateLimit {
@@ -797,7 +802,47 @@ public class GatewayProperties {
 
     /** 관리자 REST API(/admin/*) 접근 제어. api-key가 비어있으면 인증 없이 열려있다 (개발용 기본값). */
     public static class Admin {
+        /** 관리자 웹 로그인 계정(ID + BCrypt 해시). 비어 있으면 웹 로그인은 비활성이고 API 키만 쓴다. */
+        private java.util.List<AdminUser> users = new java.util.ArrayList<>();
+        /** 로그인 세션 유지 시간(분). 마지막 요청 이후 이 시간이 지나면 만료. */
+        private int sessionMinutes = 60;
+        /** 로그인 연속 실패 허용 횟수. 넘으면 lockMinutes 동안 해당 IP+ID의 로그인을 막는다. */
+        private int maxLoginFailures = 5;
+        private int lockMinutes = 5;
         private String apiKey;
+
+        public java.util.List<AdminUser> getUsers() {
+            return users;
+        }
+
+        public void setUsers(java.util.List<AdminUser> users) {
+            this.users = users;
+        }
+
+        public int getSessionMinutes() {
+            return sessionMinutes;
+        }
+
+        public void setSessionMinutes(int sessionMinutes) {
+            this.sessionMinutes = sessionMinutes;
+        }
+
+        public int getMaxLoginFailures() {
+            return maxLoginFailures;
+        }
+
+        public void setMaxLoginFailures(int maxLoginFailures) {
+            this.maxLoginFailures = maxLoginFailures;
+        }
+
+        public int getLockMinutes() {
+            return lockMinutes;
+        }
+
+        public void setLockMinutes(int lockMinutes) {
+            this.lockMinutes = lockMinutes;
+        }
+
         /** 스팸 신고 접수(POST /report)용 별도 키. 그룹웨어가 이 키만 갖고 신고를 전달한다. 비어 있으면 admin 키로만 접수. */
         private String reportApiKey;
 
@@ -816,5 +861,59 @@ public class GatewayProperties {
         public void setApiKey(String apiKey) {
             this.apiKey = apiKey;
         }
+    }
+
+    /** 관리자 웹 로그인 계정. passwordHash는 BCrypt($2a$/$2b$) 해시. */
+    public static class AdminUser {
+        private String username;
+        private String passwordHash;
+
+        public String getUsername() {
+            return username;
+        }
+
+        public void setUsername(String username) {
+            this.username = username;
+        }
+
+        public String getPasswordHash() {
+            return passwordHash;
+        }
+
+        public void setPasswordHash(String passwordHash) {
+            this.passwordHash = passwordHash;
+        }
+    }
+
+    /**
+     * 사용자 스팸 신고 처리 방식. 기본은 수동(관리자가 검토/승인). 자동으로 바꾸면 LLM 판정이 기준 이상일 때
+     * 관리자 승인 없이 룰을 추가한다. 여기 값은 초기값이고, 대시보드/API에서 바꾼 값은 settingsFile에 저장되어 우선한다.
+     */
+    public static class SpamReportOptions {
+        /** true면 자동 처리(LLM 판정으로 룰 추가/기각), false면 수동(관리자 승인). */
+        private boolean autoProcess = false;
+        /** 자동 처리에 필요한 LLM 확신도(0~1). */
+        private double autoMinConfidence = 0.9;
+        /** 자동 추가되는 룰 가중치 상한. 임계치(spam-threshold)보다 낮게 두어 단독으로 스팸 확정하지 못하게 한다. */
+        private double autoMaxWeight = 2.0;
+        /** 24시간 동안 자동으로 추가할 수 있는 룰 개수 상한(악의적 대량 신고 방어). */
+        private int autoMaxPerDay = 20;
+        /** 자동 처리 시 확신도 높은 정상(HAM) 판정은 자동 기각할지. */
+        private boolean autoDismissHam = true;
+        /** 대시보드/API로 바꾼 설정을 저장하는 파일. 상대경로면 게이트웨이 실행 디렉터리 기준. */
+        private String settingsFile = "spam-report-settings.json";
+
+        public boolean isAutoProcess() { return autoProcess; }
+        public void setAutoProcess(boolean autoProcess) { this.autoProcess = autoProcess; }
+        public double getAutoMinConfidence() { return autoMinConfidence; }
+        public void setAutoMinConfidence(double autoMinConfidence) { this.autoMinConfidence = autoMinConfidence; }
+        public double getAutoMaxWeight() { return autoMaxWeight; }
+        public void setAutoMaxWeight(double autoMaxWeight) { this.autoMaxWeight = autoMaxWeight; }
+        public int getAutoMaxPerDay() { return autoMaxPerDay; }
+        public void setAutoMaxPerDay(int autoMaxPerDay) { this.autoMaxPerDay = autoMaxPerDay; }
+        public boolean isAutoDismissHam() { return autoDismissHam; }
+        public void setAutoDismissHam(boolean autoDismissHam) { this.autoDismissHam = autoDismissHam; }
+        public String getSettingsFile() { return settingsFile; }
+        public void setSettingsFile(String settingsFile) { this.settingsFile = settingsFile; }
     }
 }

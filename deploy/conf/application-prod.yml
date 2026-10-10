@@ -91,5 +91,22 @@ gateway:
   mail-list:
     enabled: true
     blacklist-action: reject
+  spam-report:
+    # 사용자 스팸 신고 처리 방식. false=수동(관리자 승인 후 룰 반영, 기본), true=자동(LLM 판정 기준 이상이면 승인 없이 룰 추가).
+    # 대시보드 "스팸 신고" 탭에서 바꾼 값은 settings-file에 저장되어 아래 값보다 우선한다.
+    auto-process: false
+    auto-min-confidence: 0.9    # 자동 처리에 필요한 LLM 확신도
+    auto-max-weight: 2.0        # 자동 추가 룰 가중치 상한(spam-threshold보다 낮게)
+    auto-max-per-day: 20        # 24시간 자동 추가 룰 개수 상한
+    auto-dismiss-ham: true      # 확신도 높은 정상 판정은 자동 기각
+    settings-file: spam-report-settings.json
   admin:
-    api-key:   # 운영 배포 시 반드시 설정 (미설정 상태로 방치 금지)
+    # 대시보드 ID/PW 로그인 계정. password-hash는 BCrypt 해시(만드는 법은 docs/HANDOVER.md "관리자 로그인").
+    # users를 비우면 웹 로그인은 꺼지고 API 키 입력 방식만 쓴다.
+    users:
+      - username: admin
+        password-hash: ""        # 반드시 해시로 교체 (비어 있으면 로그인 불가)
+    session-minutes: 60          # 마지막 요청 후 이 시간이 지나면 세션 만료
+    max-login-failures: 5        # 연속 실패 허용 횟수 -> lock-minutes 동안 해당 IP+ID 로그인 차단
+    lock-minutes: 5
+    api-key:   # 운영 배포 시 반드시 설정 (미설정 상태로 방치 금지). 스크립트/서버 간 호출용

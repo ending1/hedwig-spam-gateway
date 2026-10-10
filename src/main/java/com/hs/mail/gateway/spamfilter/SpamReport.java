@@ -7,6 +7,9 @@ public class SpamReport {
     public static final String ANALYZED = "ANALYZED";
     public static final String RULE_APPROVED = "RULE_APPROVED";
     public static final String DISMISSED = "DISMISSED";
+    /** 자동 처리 옵션으로 LLM 판정에 따라 룰이 추가됨 / 정상으로 기각됨. */
+    public static final String AUTO_APPROVED = "AUTO_APPROVED";
+    public static final String AUTO_DISMISSED = "AUTO_DISMISSED";
 
     private final Long id;
     private final String reporter;

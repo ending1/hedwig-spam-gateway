@@ -21,12 +21,13 @@ RBL → 그레이리스팅(운영 5분) → 화이트/블랙리스트 → 룰기
 | 룰별 적중 통계·마스킹 샘플 + LLM 가중치 조언 | `RuleStatService`, `RuleAdvisorService` (조언만, 적용은 사람이) |
 | 사용자 스팸 신고 | `POST /report`(`X-Report-Key`), 관리 `/admin/spam-reports/**` |
 | 메일 리스트 | `/admin/mail-list` |
-- 관리자 API는 `X-Admin-Key`, 신고 접수는 별도 `X-Report-Key`. 신고 API 명세는 `docs/spam-report-api.md`.
-- 신고 흐름: 접수(마스킹 저장) → LLM 판정 → 스팸·확신도 ≥ 0.8이면 RAG 자동 편입 → **룰 추가는 관리자 승인 필수**.
+- **대시보드는 ID/PW 로그인**(`/admin/dashboard`). 로그인하면 HttpOnly·SameSite=Strict 세션 쿠키 + CSRF 토큰을 쓰고, 연속 5회 실패하면 해당 IP+ID를 5분 잠근다. 세션은 서버 메모리라 게이트웨이를 재시작하면 다시 로그인한다.
+- 관리자 API는 로그인 세션 **또는** `X-Admin-Key`(스크립트/서버 간 호출용)로 인증, 신고 접수는 별도 `X-Report-Key`. 신고 API 명세는 `docs/spam-report-api.md`.
+- 신고 흐름: 접수(마스킹 저장) → LLM 판정 → 스팸·확신도 ≥ 0.8이면 RAG 자동 편입 → 룰 추가는 **처리 방식 옵션**에 따름: 수동(기본, 관리자 승인 필수) / 자동(LLM 확신도 ≥ 0.9이면 승인 없이 룰 추가, 가중치 상한·일일 상한·"신고 메일에 매칭" 검증 등 안전장치 있음). 옵션은 대시보드 "스팸 신고" 탭 또는 `/admin/spam-reports/settings`에서 바꾸고 `spam-report-settings.json`에 저장. 자세한 내용은 `docs/spam-report-api.md`.
 - LLM 재사용: 분류기(Gemini/Claude/Gemma)가 `TextCompleter`를 구현해 조언·신고 판정이 같은 설정을 쓴다.
 
 ## 4. 운영 환경 (egov 개발서버)
-- ssh 별칭 `egov` (10.30.9.146). 게이트웨이 디렉터리 `/home/egov/hedwig_spam_prod`, 설정 `conf/application.yml`(root 600; **Gemini 키·관리자 키·신고 키·DB 비밀번호 포함, 출력·커밋 금지**).
+- ssh 별칭 `egov` (10.30.9.146). 게이트웨이 디렉터리 `/home/egov/hedwig_spam_prod`(**운영은 이 한 곳뿐**. 시험용 `hedwig_spam`, `hedwig_spam_node2`는 2026-10-11에 삭제함, 설정 아카이브만 `/home/egov/hedwig_spam*_removed_20261011.tar.gz`), 설정 `conf/application.yml`(root 600; **Gemini 키·관리자 키·신고 키·DB 비밀번호 포함, 출력·커밋 금지**).
 - 기동/중지(root 필요):
   ```
   cd /home/egov/hedwig_spam_prod
@@ -41,6 +42,25 @@ RBL → 그레이리스팅(운영 5분) → 화이트/블랙리스트 → 룰기
 - 그룹웨어 연동은 게이트웨이 관리 포트로 직접 호출한다: `POST http://10.30.9.146:18093/report` (`X-Report-Key`). 노드·LB 구성과 무관.
 - 롤백용 설정: `conf/application.yml.bak-h2`(이전 H2 파일 DB). H2 데이터 파일은 남아 있음.
 - Oracle 설정 포인트: `spring.sql.init.mode: never`(내장 schema.sql은 H2용), `gateway.db-dialect: oracle`. 예시는 `deploy/conf/application-prod-oracle.example.yml`.
+
+### 관리자 로그인 계정 관리
+계정은 `conf/application.yml`의 `gateway.admin.users`(ID + BCrypt 해시)이며, **추가·변경 후 게이트웨이 재시작**이 필요하다. 비밀번호는 8자 이상.
+```
+# 해시 만들기 (비밀번호는 입력받아 셸 기록에 남지 않음). 출력된 $2a$... 값을 password-hash에 넣는다.
+cd /home/egov/hedwig_spam_prod
+/usr/lib/jvm/java-8-openjdk-amd64/bin/java -Dloader.main=com.hs.mail.gateway.admin.PasswordHashTool   -cp hedwig-spam-gateway.jar org.springframework.boot.loader.PropertiesLauncher
+```
+```yaml
+gateway:
+  admin:
+    users:
+      - username: admin
+        password-hash: "$2a$10$..."   # 따옴표 필수($ 때문)
+      - username: operator2
+        password-hash: "$2a$10$..."
+```
+- 초기 계정 `admin`의 임시 비밀번호는 `/home/egov/hedwig_spam_admin_login.txt`(egov 전용 600)에 있다. **확인 후 파일을 지우고 비밀번호를 바꿀 것.**
+- `api-key`(X-Admin-Key)는 스크립트·그룹웨어 서버 호출용으로 남겨 두었다. 웹 화면에서는 입력하지 않는다. 노출됐다고 의심되면 교체 후 재시작(2026-10-11에 한 번 교체함).
 
 ## 5. DB 호환 메모 (Oracle/MariaDB)
 - Oracle은 `''`가 NULL → `hw_mail_list.recipient`의 "전체 수신자"를 `*` 센티널로 저장(`MailListDao`).

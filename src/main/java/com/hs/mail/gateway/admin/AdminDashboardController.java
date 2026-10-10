@@ -44,13 +44,24 @@ public class AdminDashboardController {
                 "</head>\n" +
                 "<body>\n" +
                 "<h1>Hedwig Spam Gateway 관리자 대시보드</h1>\n" +
-                "<form id=\"keyForm\" style=\"background:white;padding:0.6rem 1rem;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);margin:0 0 1.5rem\">\n" +
+                "<form id=\"keyForm\" style=\"display:none;background:white;padding:0.6rem 1rem;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);margin:0 0 1.5rem\">\n" +
                 "  <label for=\"adminKey\" style=\"font-size:0.85rem;color:#555\">관리자 키</label>\n" +
                 "  <input id=\"adminKey\" type=\"password\" autocomplete=\"off\" placeholder=\"설정된 경우에만 입력\" size=\"28\">\n" +
                 "  <button type=\"submit\">적용</button>\n" +
                 "  <button type=\"button\" id=\"keyClear\" style=\"background:#6b7280\">지우기</button>\n" +
                 "  <span id=\"authStatus\" style=\"font-size:0.85rem\"></span>\n" +
                 "</form>\n" +
+                "<form id=\"loginForm\" style=\"display:none;background:white;padding:0.6rem 1rem;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);margin:0 0 1.5rem\">\n" +
+                "  <label for=\"loginUser\" style=\"font-size:0.85rem;color:#555\">ID</label>\n" +
+                "  <input id=\"loginUser\" type=\"text\" autocomplete=\"username\" size=\"16\">\n" +
+                "  <label for=\"loginPass\" style=\"font-size:0.85rem;color:#555\">비밀번호</label>\n" +
+                "  <input id=\"loginPass\" type=\"password\" autocomplete=\"current-password\" size=\"20\">\n" +
+                "  <button type=\"submit\">로그인</button>\n" +
+                "  <span id=\"loginStatus\" style=\"font-size:0.85rem\"></span>\n" +
+                "</form>\n" +
+                "<div id=\"sessionBar\" style=\"display:none;background:white;padding:0.6rem 1rem;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.1);margin:0 0 1.5rem;font-size:0.9rem\">\n" +
+                "  <b id=\"sessionUser\"></b> 님으로 로그인됨 <button type=\"button\" id=\"logoutBtn\" style=\"background:#6b7280;margin-left:0.5rem\">로그아웃</button>\n" +
+                "</div>\n" +
                 "<section>\n" +
                 "  <div class=\"cards\" id=\"cards\">불러오는 중...</div>\n" +
                 "</section>\n" +
@@ -98,6 +109,14 @@ public class AdminDashboardController {
                 "<section class=\"tab-panel\" id=\"tab-reports\">\n" +
                 "  <h2>사용자 스팸 신고 (LLM 판정)</h2>\n" +
                 "  <p style=\"font-size:0.85rem;color:#555\">신고 → LLM이 판정/의견 → 확신도 높은 스팸은 RAG 사례로 자동 편입 → 룰 추가는 여기서 승인해야 반영됩니다.</p>\n" +
+                "  <div id=\"reportSettings\" style=\"border:1px solid #ddd;border-radius:8px;padding:0.6rem 0.8rem;margin:0.6rem 0;font-size:0.85rem;background:#fafafa\">\n" +
+                "    <label><b><input type=\"checkbox\" id=\"rsAuto\"> 자동 처리</b></label> <span style=\"color:#555\">(꺼짐=수동: 관리자가 승인해야 룰 반영 / 켜짐: LLM 확신도가 기준 이상이면 승인 없이 룰 추가)</span><br>\n" +
+                "    확신도 ≥ <input type=\"number\" id=\"rsConf\" min=\"0.5\" max=\"1\" step=\"0.05\" style=\"width:4.5rem\">\n" +
+                "    룰 가중치 상한 <input type=\"number\" id=\"rsW\" min=\"0.1\" max=\"5\" step=\"0.5\" style=\"width:4rem\">\n" +
+                "    하루 자동 추가 상한 <input type=\"number\" id=\"rsMax\" min=\"0\" max=\"1000\" step=\"1\" style=\"width:4.5rem\">\n" +
+                "    <label><input type=\"checkbox\" id=\"rsHam\"> 정상 판정(확신도 이상)은 자동 기각</label>\n" +
+                "    <button id=\"rsSave\">저장</button> <span id=\"rsStatus\" style=\"margin-left:0.5rem\"></span>\n" +
+                "  </div>\n" +
                 "  <table id=\"reportTable\">\n" +
                 "    <thead><tr><th>ID</th><th>신고자</th><th>발신 도메인</th><th>제목 / 본문 일부</th><th>LLM 판정</th><th>의견</th><th>제안 룰</th><th>상태</th><th>RAG</th><th></th></tr></thead>\n" +
                 "    <tbody></tbody>\n" +
@@ -116,13 +135,36 @@ public class AdminDashboardController {
                 "  opts = opts || {};\n" +
                 "  const headers = Object.assign({}, opts.headers || {});\n" +
                 "  if (getKey()) headers['X-Admin-Key'] = getKey();\n" +
-                "  const res = await fetch(url, Object.assign({}, opts, { headers }));\n" +
+                "  if (window.csrfToken) headers['X-CSRF-Token'] = window.csrfToken;\n" +
+                "  const res = await fetch(url, Object.assign({}, opts, { headers, credentials: 'same-origin' }));\n" +
                 "  if (res.status === 401) {\n" +
-                "    showAuth(getKey() ? '키가 올바르지 않습니다' : '관리자 키가 필요합니다', true);\n" +
-                "  } else if (res.ok && getKey()) {\n" +
+                "    if (window.loginEnabled) { showLogin('세션이 없거나 만료되었습니다. 다시 로그인하세요.'); }\n" +
+                "    else showAuth(getKey() ? '키가 올바르지 않습니다' : '관리자 키가 필요합니다', true);\n" +
+                "  } else if (res.ok && getKey() && !window.loginEnabled) {\n" +
                 "    showAuth('키 적용됨', false);\n" +
                 "  }\n" +
                 "  return res;\n" +
+                "}\n" +
+                "function showLogin(msg) {\n" +
+                "  document.getElementById('sessionBar').style.display = 'none';\n" +
+                "  document.getElementById('loginForm').style.display = '';\n" +
+                "  const el = document.getElementById('loginStatus'); el.textContent = msg || ''; el.style.color = '#dc2626';\n" +
+                "}\n" +
+                "function showSession(name) {\n" +
+                "  document.getElementById('loginForm').style.display = 'none';\n" +
+                "  document.getElementById('sessionBar').style.display = '';\n" +
+                "  document.getElementById('sessionUser').textContent = name;\n" +
+                "}\n" +
+                "/** 로그인 계정이 설정된 서버면 ID/PW 로그인, 아니면 기존 관리자 키 입력을 보여준다. */\n" +
+                "async function initAuth() {\n" +
+                "  try {\n" +
+                "    const res = await fetch('/admin/session', { credentials: 'same-origin' });\n" +
+                "    const st = await res.json();\n" +
+                "    window.loginEnabled = !!st.loginEnabled;\n" +
+                "    if (!st.loginEnabled) { document.getElementById('keyForm').style.display = ''; return true; }\n" +
+                "    if (st.authenticated) { window.csrfToken = st.csrfToken; showSession(st.username); return true; }\n" +
+                "    showLogin(''); return false;\n" +
+                "  } catch (e) { document.getElementById('keyForm').style.display = ''; return true; }\n" +
                 "}\n" +
                 "async function loadStats() {\n" +
                 "  const res = await fetch('/actuator/gateway');\n" +
@@ -233,7 +275,30 @@ public class AdminDashboardController {
                 "    overlay.style.display = 'none';\n" +
                 "  };\n" +
                 "}\n" +
+                "async function loadReportSettings() {\n" +
+                "  const res = await adminFetch('/admin/spam-reports/settings');\n" +
+                "  if (!res.ok) return;\n" +
+                "  const st = await res.json();\n" +
+                "  document.getElementById('rsAuto').checked = !!st.autoProcess;\n" +
+                "  document.getElementById('rsConf').value = st.autoMinConfidence;\n" +
+                "  document.getElementById('rsW').value = st.autoMaxWeight;\n" +
+                "  document.getElementById('rsMax').value = st.autoMaxPerDay;\n" +
+                "  document.getElementById('rsHam').checked = !!st.autoDismissHam;\n" +
+                "  window.rsLoaded = true;\n" +
+                "}\n" +
+                "document.getElementById('rsSave').addEventListener('click', async () => {\n" +
+                "  const auto = document.getElementById('rsAuto').checked;\n" +
+                "  if (auto && !confirm('자동 처리를 켜면 LLM 판정만으로 룰이 추가됩니다(관리자 승인 없음). 진행할까요?')) return;\n" +
+                "  const body = { autoProcess: auto, autoMinConfidence: parseFloat(document.getElementById('rsConf').value),\n" +
+                "    autoMaxWeight: parseFloat(document.getElementById('rsW').value), autoMaxPerDay: parseInt(document.getElementById('rsMax').value, 10),\n" +
+                "    autoDismissHam: document.getElementById('rsHam').checked };\n" +
+                "  const res = await adminFetch('/admin/spam-reports/settings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });\n" +
+                "  const el = document.getElementById('rsStatus');\n" +
+                "  el.textContent = res.ok ? '저장됨' : '저장 실패'; el.style.color = res.ok ? '#16a34a' : '#dc2626';\n" +
+                "  if (res.ok) loadReportSettings();\n" +
+                "});\n" +
                 "async function loadReports() {\n" +
+                "  if (!window.rsLoaded) await loadReportSettings();\n" +
                 "  const tbody = document.querySelector('#reportTable tbody');\n" +
                 "  const res = await adminFetch('/admin/spam-reports');\n" +
                 "  if (!res.ok) { tbody.innerHTML = ''; return; }\n" +
@@ -248,10 +313,11 @@ public class AdminDashboardController {
                 "    <td>${r.status === 'PENDING' ? '분석 중' : (vk[r.verdict] || '-') + ' (' + Math.round((r.score || 0) * 100) + '%)'}</td>\n" +
                 "    <td>${escapeHtml(r.reason || '')}</td>\n" +
                 "    <td>${r.suggestedPattern ? '<code>' + escapeHtml(r.suggestedPattern) + '</code> (' + r.suggestedWeight + ')' : '-'}</td>\n" +
-                "    <td>${{ PENDING: '분석 중', ANALYZED: '검토 대기', RULE_APPROVED: '룰 추가됨', DISMISSED: '기각' }[r.status] || r.status}</td>\n" +
+                "    <td>${{ PENDING: '분석 중', ANALYZED: '검토 대기', RULE_APPROVED: '룰 추가됨', DISMISSED: '기각', AUTO_APPROVED: '자동 룰 추가', AUTO_DISMISSED: '자동 기각' }[r.status] || r.status}</td>\n" +
                 "    <td>${r.ragAdded ? '사용 중' : '-'}</td>\n" +
                 "    <td>\n" +
                 "      <button data-act=\"approve\" data-id=\"${r.id}\">룰 추가</button>\n" +
+                "      <button data-act=\"reanalyze\" data-id=\"${r.id}\">LLM 재분석</button>\n" +
                 "      <button data-act=\"rag\" data-id=\"${r.id}\">${r.ragAdded ? 'RAG 제외' : 'RAG 추가'}</button>\n" +
                 "      <button class=\"danger\" data-act=\"dismiss\" data-id=\"${r.id}\">기각</button>\n" +
                 "    </td>\n" +
@@ -268,6 +334,10 @@ public class AdminDashboardController {
                 "    const res = await adminFetch(`/admin/spam-reports/${id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pattern, weight: w }) });\n" +
                 "    if (!res.ok) { const b = await res.json(); alert(b.error || '룰을 추가하지 못했습니다'); return; }\n" +
                 "    loadRules();\n" +
+                "  } else if (btn.dataset.act === 'reanalyze') {\n" +
+                "    btn.disabled = true; btn.textContent = '분석 중...';\n" +
+                "    const res = await adminFetch(`/admin/spam-reports/${id}/reanalyze`, { method: 'POST' });\n" +
+                "    if (!res.ok) { const b = await res.json().catch(() => ({})); alert(b.error || 'LLM 재분석에 실패했습니다'); }\n" +
                 "  } else if (btn.dataset.act === 'rag') {\n" +
                 "    await adminFetch(`/admin/spam-reports/${id}/rag`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on: !r.ragAdded }) });\n" +
                 "  } else if (btn.dataset.act === 'dismiss') {\n" +
@@ -311,10 +381,25 @@ public class AdminDashboardController {
                 "  setKey(''); document.getElementById('adminKey').value = '';\n" +
                 "  showAuth('키를 지웠습니다', false); loadList(); loadRules(); loadReports();\n" +
                 "});\n" +
+                "document.getElementById('loginForm').addEventListener('submit', async (e) => {\n" +
+                "  e.preventDefault();\n" +
+                "  const body = { username: document.getElementById('loginUser').value.trim(), password: document.getElementById('loginPass').value };\n" +
+                "  const res = await fetch('/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), credentials: 'same-origin' });\n" +
+                "  const data = await res.json().catch(() => ({}));\n" +
+                "  if (!res.ok) { showLogin(data.error || '로그인하지 못했습니다'); return; }\n" +
+                "  document.getElementById('loginPass').value = '';\n" +
+                "  window.csrfToken = data.csrfToken; showSession(data.username);\n" +
+                "  loadList(); loadRules(); loadReports();\n" +
+                "});\n" +
+                "document.getElementById('logoutBtn').addEventListener('click', async () => {\n" +
+                "  await fetch('/admin/logout', { method: 'POST', headers: { 'X-CSRF-Token': window.csrfToken || '' }, credentials: 'same-origin' });\n" +
+                "  window.csrfToken = ''; location.reload();\n" +
+                "});\n" +
                 "document.getElementById('adminKey').value = getKey();\n" +
                 "let savedTab = 'rules'; try { savedTab = sessionStorage.getItem(TAB_STORE) || 'rules'; } catch (e) {}\n" +
                 "showTab(savedTab);\n" +
-                "loadStats(); loadList(); loadRules(); loadReports();\n" +
+                "loadStats();\n" +
+                "initAuth().then((ok) => { if (ok) { loadList(); loadRules(); loadReports(); } });\n" +
                 "setInterval(loadStats, 5000);\n" +
                 "</script>\n" +
                 "</body>\n" +

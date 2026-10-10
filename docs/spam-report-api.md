@@ -84,8 +84,39 @@ curl -X POST http://10.30.9.146:18093/report \
 ```
 접수(마스킹 저장) → LLM 판정: 스팸/정상/불확실 + 의견 + 룰 후보
   → 스팸이고 확신도 80% 이상: RAG 사례로 자동 편입(이후 판정 참고자료)
-  → 룰(키워드) 추가는 관리자가 대시보드 "스팸 신고" 탭에서 승인해야만 반영
+  → 룰(키워드) 추가는 "처리 방식" 옵션에 따름
 ```
+
+### 처리 방식(수동/자동)
+
+| 옵션 | 동작 |
+|---|---|
+| **수동(기본)** | 관리자가 대시보드 "스팸 신고" 탭에서 LLM 판정·의견·제안 룰을 보고 `룰 추가`(승인) 또는 `기각`을 누른다. 승인해야만 룰이 반영된다. |
+| **자동** | LLM 확신도가 기준(기본 90%) 이상이면 관리자 승인 없이 처리한다. 스팸이면 제안 룰을 추가(상태 `AUTO_APPROVED`), 정상이면 기각(`AUTO_DISMISSED`). 기준에 못 미치거나 아래 안전장치에 걸리면 `ANALYZED`(검토 대기)로 남아 수동 처리한다. |
+
+자동 처리의 안전장치(신고 본문은 외부 텍스트라 LLM 제안이 조작될 수 있다):
+- 제안 정규식이 컴파일되고 너무 일반적이지 않아야 한다.
+- 제안 정규식이 **신고된 메일 자체에 실제로 매칭**되어야 한다.
+- 추가되는 룰 가중치는 상한(기본 2.0, 스팸 임계치 5.0 미만)으로 자른다. 단독으로 스팸 확정하지 못한다.
+- 24시간 자동 추가 개수 상한(기본 20)을 넘으면 이후는 수동 검토로 남긴다.
+- 이미 같은 패턴의 룰이 있으면 중복 추가하지 않는다.
+
+설정은 `gateway.spam-report.*`(`application.yml`)가 초기값이고, 대시보드나 아래 API로 바꾼 값은 `settings-file`(기본 `spam-report-settings.json`, 게이트웨이 실행 디렉터리 기준)에 저장되어 재시작 후에도 우선한다. 자동 룰은 대시보드 룰 관리 탭에서 언제든 비활성화/삭제할 수 있다.
+
+### 관리자 API (대시보드 로그인 세션 또는 `X-Admin-Key`)
+
+대시보드 ID/PW 로그인 후에는 세션 쿠키로 호출된다(변경 요청은 `X-CSRF-Token` 필요, 대시보드가 자동 처리). 스크립트는 `X-Admin-Key` 헤더를 쓴다. 로그인: `POST /admin/login`(`username`, `password`), `POST /admin/logout`, `GET /admin/session`.
+
+| API | 설명 |
+|---|---|
+| `GET /admin/spam-reports` | 신고 목록(LLM 판정/의견/제안 룰/상태) |
+| `POST /admin/spam-reports/{id}/approve` | 룰 추가(승인). body 선택: `pattern`, `weight` |
+| `POST /admin/spam-reports/{id}/dismiss` | 기각 |
+| `POST /admin/spam-reports/{id}/reanalyze` | 저장된(마스킹된) 내용을 LLM으로 재분석. 관리자 판단을 돕는 용도이며 자동 처리는 하지 않음 |
+| `GET /admin/spam-reports/settings` | 처리 방식/기준 조회 |
+| `PUT /admin/spam-reports/settings` | 변경. body(모두 선택): `autoProcess`, `autoMinConfidence`(0.5~1), `autoMaxWeight`(0.1~5), `autoMaxPerDay`(0~1000), `autoDismissHam` |
+
+신고 상태: `PENDING`(분석 중) → `ANALYZED`(검토 대기) → `RULE_APPROVED`/`DISMISSED`(관리자) 또는 `AUTO_APPROVED`/`AUTO_DISMISSED`(자동).
 
 신고자가 판정 결과를 조회하는 API는 제공하지 않는다(결과는 관리자 전용).
 
