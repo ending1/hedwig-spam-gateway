@@ -35,6 +35,10 @@ RBL → 그레이리스팅(운영 5분) → 화이트/블랙리스트 → 룰기
 - 배포: `mvn -q package` → jar를 scp → stop → `hedwig-spam-gateway.jar` 교체 → start. 포트: 25(게이트웨이), 2599/143(Hedwig), 18093(관리).
 - 운영 Hedwig는 `sudo /home/egov/hedwig/bin/run.sh start`. Hedwig 뒤쪽 포트는 2599.
 - **DB는 Oracle 19c로 전환 완료**(`10.30.9.143:1521:ora19c`, 계정 `egov`, Hedwig와 같은 계정). 게이트웨이 테이블 7개(`hw_ban_list, hw_greylist, hw_mail_list, hw_spam_rule, hw_spam_rule_stat, hw_spam_rule_sample, hw_spam_report`)+시퀀스·트리거 3쌍. DDL은 `src/main/sql/oracle/`.
+- **운영은 `hedwig_spam_prod` 단일 인스턴스**다(egov 한 대, 계정 `egov`). 메일 경로는 `외부 → 25(게이트웨이) → 2599(Hedwig SMTP)`이고 IMAP은 Hedwig가 143에서 직접 서비스한다. 메일 경로에 로드밸런서는 없다.
+- 같은 서버의 `hedwig_spam`(node1용, 수신 12535/관리 18091, 백엔드 2560)과 `hedwig_spam_node2`(수신 12545/관리 18092, 백엔드 2561)는 초기 **시험용 데모**(H2 메모리 DB, 그레이리스트 1분)이며 **중지 상태**, 운영과 무관하다. `hedwig_spam`에는 시험용 `FakeHedwig`(12570)가 계속 떠 있을 수 있다.
+- `hedwig-smtp-frontend`/`hedwig-imap-frontend`(Java LB, 백엔드 127.0.0.1:2560·2561)는 failover 시험용으로 **구동하지 않으며 운영 경로에 없다**. egov의 nginx(`/home/egov/nginx`, SSL 16443)는 그룹웨어 웹 접속용이라 메일과 무관하다.
+- 그룹웨어 연동은 게이트웨이 관리 포트로 직접 호출한다: `POST http://10.30.9.146:18093/report` (`X-Report-Key`). 노드·LB 구성과 무관.
 - 롤백용 설정: `conf/application.yml.bak-h2`(이전 H2 파일 DB). H2 데이터 파일은 남아 있음.
 - Oracle 설정 포인트: `spring.sql.init.mode: never`(내장 schema.sql은 H2용), `gateway.db-dialect: oracle`. 예시는 `deploy/conf/application-prod-oracle.example.yml`.
 
