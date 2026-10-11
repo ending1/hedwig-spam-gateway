@@ -42,6 +42,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -116,6 +117,11 @@ class InboundFilterFrontHandlerTest {
     }
 
     private List<String> runTransaction() throws Exception {
+        return runTransaction(new String[0]);
+    }
+
+    /** extraHeaders: DATA의 Subject 앞에 먼저 보낼 헤더 줄들(외부에서 위조한 X-Spam-* 헤더 시뮬레이션용). */
+    private List<String> runTransaction(String... extraHeaders) throws Exception {
         try (Socket socket = new Socket("127.0.0.1", gatewayPort)) {
             BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
             PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
@@ -130,6 +136,9 @@ class InboundFilterFrontHandlerTest {
             responses.add(in.readLine());
             out.print("DATA\r\n"); out.flush();
             responses.add(in.readLine());
+            for (String h : extraHeaders) {
+                out.print(h + "\r\n"); out.flush();
+            }
             out.print("Subject: hello\r\n"); out.flush();
             out.print("\r\n"); out.flush();
             out.print("body line\r\n"); out.flush();
@@ -342,5 +351,75 @@ class InboundFilterFrontHandlerTest {
                 // 소켓 종료로 인한 예외는 테스트 종료 시 정상
             }
         }
+    }
+
+    @Test
+    void 외부에서_위조한_X_Spam_헤더는_정상_판정이면_제거되어_전달된다() throws Exception {
+        start(fixedVerdictClassifier(false));
+        runTransaction("X-Spam-Flag: YES", "x-spam-score: 9.9", "X-Spam-Provider: evil", "\tfolded-evil-continuation");
+        fakeBackend.awaitDataCaptured(5, TimeUnit.SECONDS);
+        String data = String.join("\n", fakeBackend.getCapturedDataLines());
+        assertFalse(data.toLowerCase().contains("x-spam-"), "위조 헤더가 남아 있다: " + data);
+        assertFalse(data.contains("folded-evil-continuation"), "접힌 줄도 함께 제거돼야 한다");
+        assertTrue(data.contains("Subject: hello"), "다른 헤더는 그대로");
+        assertTrue(data.contains("body line"), "본문은 그대로");
+    }
+
+    @Test
+    void 위조한_X_Spam_헤더는_분류기가_보기_전에_제거된다() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<String> seen = new java.util.concurrent.atomic.AtomicReference<>();
+        start(new SpamClassifier() {
+            @Override
+            public SpamVerdict classify(SpamCheckRequest request) {
+                seen.set(request.getHeaders() + "\n" + request.getBody());
+                return SpamVerdict.ham("probe");
+            }
+
+            @Override
+            public String name() {
+                return "probe";
+            }
+        });
+        runTransaction("X-Spam-Flag: YES", "X-Spam-Score: 9.9");
+        fakeBackend.awaitDataCaptured(5, TimeUnit.SECONDS);
+        assertTrue(seen.get() != null, "분류기가 호출돼야 한다");
+        assertFalse(seen.get().toLowerCase().contains("x-spam-"), "분류기가 위조 헤더를 보았다: " + seen.get());
+        assertTrue(seen.get().contains("hello"), "다른 헤더(Subject)는 분류기에 그대로 전달");
+    }
+
+    @Test
+    void 스팸_판정이면_위조값_대신_게이트웨이_판정만_남는다() throws Exception {
+        start(fixedVerdictClassifier(true));
+        runTransaction("X-Spam-Score: 0.0", "X-Spam-Provider: evil");
+        fakeBackend.awaitDataCaptured(5, TimeUnit.SECONDS);
+        List<String> lines = fakeBackend.getCapturedDataLines();
+        assertTrue(lines.get(0).startsWith("X-Spam-Flag: YES"));
+        String data = String.join("\n", lines);
+        assertFalse(data.contains("evil"));
+        int scoreHeaders = 0;
+        for (String l : lines) {
+            if (l.toLowerCase().startsWith("x-spam-score:")) {
+                scoreHeaders++;
+                assertEquals("X-Spam-Score: 0.9", l, "게이트웨이가 계산한 점수만");
+            }
+        }
+        assertEquals(1, scoreHeaders);
+    }
+
+    @Test
+    void stripSpamHeaders는_헤더_영역만_정리하고_본문은_보존한다() {
+        List<String> in = new ArrayList<>();
+        in.add("Received: from x");
+        in.add("X-Spam-Flag : YES");          // 콜론 앞 공백
+        in.add("X-SPAM-PROVIDER: evil");
+        in.add("  continued");               // 접힌 줄(앞 헤더와 함께 제거)
+        in.add("X-Spam-Level: ***");          // 게이트웨이가 쓰지 않는 헤더는 유지
+        in.add("Subject: hi");
+        in.add("");
+        in.add("X-Spam-Flag: YES");          // 본문에 같은 문자열이 있어도 보존
+        in.add("body");
+        List<String> out = InboundFilterFrontHandler.stripSpamHeaders(in);
+        assertEquals(java.util.Arrays.asList("Received: from x", "X-Spam-Level: ***", "Subject: hi", "", "X-Spam-Flag: YES", "body"), out);
+        assertEquals(9, in.size(), "입력 목록은 바꾸지 않는다");
     }
 }

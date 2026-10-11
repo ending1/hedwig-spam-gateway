@@ -11,6 +11,8 @@ Claude Code로 이 프로젝트를 이어받는 사람을 위한 문서. 코드 
 ## 2. 메일 처리 파이프라인
 RBL → 그레이리스팅(운영 5분) → 화이트/블랙리스트 → 룰기반(`hw_spam_rule`, 합계 ≥ 5.0이면 스팸) → (룰로 스팸 확정이 아니면) Gemini 분류.
 - 사내 도메인 사칭 룰(`internal-domain-spoof`): `internal-domains`와 `trusted-networks` 설정 기반. 사내 스팸 2개월치(32,563건)의 64%가 이 유형이었음.
+- **위조 방지**: 외부에서 들어온 메일에 이미 있는 `X-Spam-Flag/Score/Provider` 헤더는 **판정 전에 제거**한다(`InboundFilterFrontHandler.stripSpamHeaders`). Hedwig가 `X-Spam-Flag`로 스팸 편지함 이동을 결정하고, LLM이 위조 헤더를 보고 오판한 사례가 있었기 때문이다. 게이트웨이가 스팸으로 판정한 메일에만 자기 헤더를 붙인다.
+- 처리 순서 참고: RCPT 단계에서 **화이트/블랙리스트를 그레이리스팅보다 먼저** 확인한다. 화이트리스트 매치는 그레이리스팅과 이후 스팸 판정(룰/LLM)을 모두 건너뛴다.
 - RAG(문자 3-gram TF-IDF): 사내 코퍼스 평가에서 이득 없음 → 기본 비활성. 단, 사용자 신고 사례 편입에는 사용(현재 egov에서 켬).
 
 ## 3. 주요 기능과 API
@@ -19,7 +21,7 @@ RBL → 그레이리스팅(운영 5분) → 화이트/블랙리스트 → 룰기
 | 대시보드(탭: 룰 관리/스팸 신고/화이트·블랙리스트) | `/admin/dashboard`, 포트 18093 |
 | 룰 CRUD | `/admin/spam-rules` (+ `/stats`, `/{id}/samples`, `/{id}/advice`) |
 | 룰별 적중 통계·마스킹 샘플 + LLM 가중치 조언 | `RuleStatService`, `RuleAdvisorService` (조언만, 적용은 사람이) |
-| 사용자 스팸 신고 | `POST /report`(`X-Report-Key`, 선택 필드 `reason`=신고 사유), 관리 `/admin/spam-reports/**` |
+| 사용자 스팸 신고 | `POST /report`(`X-Report-Key`, 선택 필드 `reason`=신고 사유) + `POST /report/{id}/eml`(메일 원본 업로드, 최대 10MB), 관리 `/admin/spam-reports/**`(원본은 `GET .../{id}/eml`로 다운로드만, 보관 경로는 `gateway.spam-report.eml-dir`) |
 | 메일 리스트 | `/admin/mail-list` |
 - **대시보드는 ID/PW 로그인**(`/admin/dashboard`). 로그인하면 HttpOnly·SameSite=Strict 세션 쿠키 + CSRF 토큰을 쓰고, 연속 5회 실패하면 해당 IP+ID를 5분 잠근다. 세션은 서버 메모리라 게이트웨이를 재시작하면 다시 로그인한다.
 - 관리자 API는 로그인 세션 **또는** `X-Admin-Key`(스크립트/서버 간 호출용)로 인증, 신고 접수는 별도 `X-Report-Key`. 신고 API 명세는 `docs/spam-report-api.md`.

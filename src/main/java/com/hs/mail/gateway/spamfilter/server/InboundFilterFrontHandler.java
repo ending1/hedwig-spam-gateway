@@ -221,7 +221,12 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
     }
 
     private void classifyAndForward(ChannelHandlerContext ctx) {
-        List<String> bufferedLines = session.dataBuffer;
+        // 위조된 X-Spam-* 헤더는 판정 전에 제거한다. 룰/LLM이 그 값을 근거로 삼아 오판하지 않게 하고(실제로 LLM이
+        // 위조 헤더를 보고 스팸으로 판정한 사례가 있었다), 전달할 때는 게이트웨이 자신의 판정 헤더만 붙는다.
+        List<String> bufferedLines = stripSpamHeaders(session.dataBuffer);
+        if (bufferedLines.size() != session.dataBuffer.size()) {
+            log.warn("들어온 메일의 X-Spam-* 헤더를 제거했습니다(위조 방지): from={}", session.mailFrom);
+        }
 
         if (session.whitelisted) {
             deliverBufferedData(ctx, SpamVerdict.ham("mail-list-whitelist"), bufferedLines);
@@ -264,6 +269,46 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
             SpamVerdict finalVerdict = verdict;
             ctx.channel().eventLoop().execute(() -> deliverBufferedData(ctx, finalVerdict, bufferedLines));
         });
+    }
+
+    /**
+     * 게이트웨이가 직접 붙이는 스팸 판정 헤더. Hedwig는 X-Spam-Flag를 보고 스팸 편지함으로 옮기므로, 외부에서 위조해 보낸
+     * 같은 이름의 헤더는 전달하기 전에 반드시 지우고 게이트웨이 자신의 판정만 붙인다.
+     */
+    private static boolean isGatewaySpamHeader(String line) {
+        int colon = line.indexOf(':');
+        if (colon <= 0) {
+            return false;
+        }
+        String name = line.substring(0, colon).trim().toLowerCase(java.util.Locale.ROOT);
+        return name.equals("x-spam-flag") || name.equals("x-spam-score") || name.equals("x-spam-provider");
+    }
+
+    /** 들어온 메일의 헤더 영역에서 게이트웨이 스팸 판정 헤더(접힌 줄 포함)를 제거한 새 목록을 돌려준다. 본문은 건드리지 않는다. */
+    static List<String> stripSpamHeaders(List<String> lines) {
+        List<String> out = new java.util.ArrayList<>(lines.size());
+        boolean inHeaders = true;
+        boolean dropping = false;
+        for (String line : lines) {
+            if (inHeaders) {
+                if (line.isEmpty()) {
+                    inHeaders = false;
+                    dropping = false;
+                } else if (line.charAt(0) == ' ' || line.charAt(0) == '\t') {
+                    // 접힌(folded) 헤더 줄: 앞 헤더를 지웠다면 같이 지운다
+                    if (dropping) {
+                        continue;
+                    }
+                } else {
+                    dropping = isGatewaySpamHeader(line);
+                    if (dropping) {
+                        continue;
+                    }
+                }
+            }
+            out.add(line);
+        }
+        return out;
     }
 
     private void deliverBufferedData(ChannelHandlerContext ctx, SpamVerdict verdict, List<String> bufferedLines) {
