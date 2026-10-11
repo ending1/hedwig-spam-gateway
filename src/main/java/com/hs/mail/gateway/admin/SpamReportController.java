@@ -3,6 +3,12 @@ package com.hs.mail.gateway.admin;
 import com.hs.mail.gateway.spamfilter.SpamReport;
 import com.hs.mail.gateway.spamfilter.SpamReportService;
 import com.hs.mail.gateway.spamfilter.SpamReportSettings;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import com.hs.mail.gateway.spamfilter.SpamRuleEntry;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +20,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RestController;
 
+import javax.servlet.http.HttpServletRequest;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,6 +36,7 @@ import java.util.Map;
 @RestController
 public class SpamReportController {
 
+    private static final Logger log = LoggerFactory.getLogger(SpamReportController.class);
     private static final int MAX_BODY_CHARS = 20000;
 
     private final SpamReportService service;
@@ -57,6 +68,61 @@ public class SpamReportController {
         res.put("id", id);
         res.put("status", SpamReport.PENDING);
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(res);
+    }
+
+    /**
+     * 신고 접수 후 메일 원본(EML)을 올린다(그룹웨어 서버가 호출). 본문은 원본 바이트 그대로(message/rfc822 또는
+     * application/octet-stream). 신고당 1회, 크기 상한(gateway.spam-report.eml-max-bytes) 초과 시 413.
+     */
+    @PostMapping("/report/{id}/eml")
+    public ResponseEntity<?> uploadEml(@RequestHeader(value = "X-Report-Key", required = false) String reportKey,
+                                        @RequestHeader(value = "X-Admin-Key", required = false) String adminKey,
+                                        @PathVariable long id, HttpServletRequest request) throws IOException {
+        if (!guard.isReportAuthorized(reportKey, adminKey)) {
+            return error(HttpStatus.UNAUTHORIZED, "invalid report key");
+        }
+        SpamReportService.EmlStoreResult res = service.storeEml(id, request.getInputStream());
+        switch (res.getStatus()) {
+            case STORED:
+                Map<String, Object> ok = new LinkedHashMap<>();
+                ok.put("id", id);
+                ok.put("size", res.getSize());
+                return ResponseEntity.status(HttpStatus.CREATED).body(ok);
+            case NOT_FOUND:
+                return error(HttpStatus.NOT_FOUND, "신고를 찾을 수 없습니다: " + id);
+            case EXISTS:
+                return error(HttpStatus.CONFLICT, "이미 원본이 보관된 신고입니다");
+            case TOO_LARGE:
+                return error(HttpStatus.PAYLOAD_TOO_LARGE, "원본이 너무 큽니다");
+            case EMPTY:
+                return error(HttpStatus.BAD_REQUEST, "원본이 비어 있습니다");
+            default:
+                return error(HttpStatus.SERVICE_UNAVAILABLE, "원본을 보관할 수 없습니다");
+        }
+    }
+
+    /**
+     * 보관된 메일 원본(EML) 다운로드(관리자). 스팸 메일은 악성 HTML/첨부를 담고 있을 수 있어서 화면에 직접 렌더링하지 않고
+     * 항상 첨부 파일(application/octet-stream)로만 내려준다.
+     */
+    @GetMapping("/admin/spam-reports/{id}/eml")
+    public ResponseEntity<?> downloadEml(@RequestHeader(value = "X-Admin-Key", required = false) String adminKey,
+                                          @PathVariable long id, HttpServletRequest request) throws IOException {
+        if (!guard.isAuthorized(adminKey)) {
+            return error(HttpStatus.UNAUTHORIZED, "invalid X-Admin-Key");
+        }
+        Path file = service.findEml(id);
+        if (file == null) {
+            return error(HttpStatus.NOT_FOUND, "보관된 메일 원본이 없습니다: " + id);
+        }
+        log.info("신고 #{} 메일 원본(EML) 다운로드: ip={}", id, request.getRemoteAddr());
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+        headers.setContentDisposition(ContentDisposition.attachment().filename("spam-report-" + id + ".eml").build());
+        headers.setContentLength(Files.size(file));
+        headers.set("X-Content-Type-Options", "nosniff");
+        headers.setCacheControl("no-store");
+        return ResponseEntity.ok().headers(headers).body(new FileSystemResource(file));
     }
 
     @GetMapping("/admin/spam-reports")
@@ -188,6 +254,7 @@ public class SpamReportController {
         m.put("subject", r.getSubject());
         m.put("snippet", r.getSnippet());
         m.put("reporterReason", r.getReporterReason());
+        m.put("hasEml", r.hasEml());
         m.put("status", r.getStatus());
         m.put("verdict", r.getLlmVerdict());
         m.put("score", r.getLlmScore());

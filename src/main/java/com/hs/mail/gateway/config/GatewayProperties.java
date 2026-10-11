@@ -902,6 +902,13 @@ public class GatewayProperties {
         private boolean autoDismissHam = true;
         /** 대시보드/API로 바꾼 설정을 저장하는 파일. 상대경로면 게이트웨이 실행 디렉터리 기준. */
         private String settingsFile = "spam-report-settings.json";
+        /**
+         * 신고된 메일 원본(EML)을 보관하는 디렉터리. 파일은 "{신고ID}.eml"로 저장하고 DB에는 파일 이름만 둔다.
+         * 여러 인스턴스를 운영하면 모든 인스턴스가 같은 공유 경로(NFS 등)를 가리키게 설정한다. 상대경로면 실행 디렉터리 기준.
+         */
+        private String emlDir = "eml";
+        /** 신고 메일 원본(EML) 최대 크기(바이트). 넘으면 업로드를 거부한다. 기본 10MB. */
+        private long emlMaxBytes = 10L * 1024 * 1024;
 
         public boolean isAutoProcess() { return autoProcess; }
         public void setAutoProcess(boolean autoProcess) { this.autoProcess = autoProcess; }
@@ -915,5 +922,9 @@ public class GatewayProperties {
         public void setAutoDismissHam(boolean autoDismissHam) { this.autoDismissHam = autoDismissHam; }
         public String getSettingsFile() { return settingsFile; }
         public void setSettingsFile(String settingsFile) { this.settingsFile = settingsFile; }
+        public String getEmlDir() { return emlDir; }
+        public void setEmlDir(String emlDir) { this.emlDir = emlDir; }
+        public long getEmlMaxBytes() { return emlMaxBytes; }
+        public void setEmlMaxBytes(long emlMaxBytes) { this.emlMaxBytes = emlMaxBytes; }
     }
 }

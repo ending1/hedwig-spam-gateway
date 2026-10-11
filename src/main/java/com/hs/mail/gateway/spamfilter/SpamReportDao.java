@@ -40,30 +40,52 @@ public class SpamReportDao {
     private final GatewaySql sql;
     /** reporter_reason 컬럼을 쓸 수 있는지. 컬럼 추가에 실패하면 false로 두고 사유만 저장하지 않는다. */
     private final boolean reasonSupported;
+    /** eml_path 컬럼을 쓸 수 있는지(메일 원본 보관). 실패하면 false. */
+    private final boolean emlSupported;
 
     public SpamReportDao(JdbcTemplate jdbcTemplate, GatewaySql sql) {
         this.jdbcTemplate = jdbcTemplate;
         this.sql = sql;
-        this.reasonSupported = ensureReasonColumn();
+        this.reasonSupported = ensureColumn("spamreport.probeReason", "spamreport.addReasonColumn", "reporter_reason");
+        this.emlSupported = ensureColumn("spamreport.probeEml", "spamreport.addEmlColumn", "eml_path");
+    }
+
+    /** 신고 메일 원본(EML)을 보관할 수 있는지(eml_path 컬럼 사용 가능 여부). */
+    public boolean isEmlSupported() {
+        return emlSupported;
     }
 
     /**
      * hw_spam_report.reporter_reason 컬럼이 있는지 확인하고, 없으면 한 번 추가한다.
      * 신고 접수/판정의 기존 쿼리는 이 컬럼을 쓰지 않으므로, 실패해도 예외를 던지지 않고 사유 저장만 끈다.
      */
-    private boolean ensureReasonColumn() {
+    private boolean ensureColumn(String probeKey, String addKey, String column) {
         try {
-            jdbcTemplate.execute(sql.get("spamreport.probeReason"));
+            jdbcTemplate.execute(sql.get(probeKey));
             return true;
         } catch (RuntimeException probeFailure) {
             try {
-                jdbcTemplate.execute(sql.get("spamreport.addReasonColumn"));
-                log.info("hw_spam_report.reporter_reason 컬럼을 추가했습니다");
+                jdbcTemplate.execute(sql.get(addKey));
+                log.info("hw_spam_report.{} 컬럼을 추가했습니다", column);
                 return true;
             } catch (RuntimeException e) {
-                log.error("hw_spam_report.reporter_reason 컬럼을 추가하지 못해 신고 사유 저장을 끕니다: {}", e.getMessage());
+                log.error("hw_spam_report.{} 컬럼을 추가하지 못해 해당 기능(사유/원본 보관)을 끕니다: {}", column, e.getMessage());
                 return false;
             }
+        }
+    }
+
+    /** 보관된 메일 원본 파일 이름을 기록한다. 컬럼을 쓸 수 없으면 false. */
+    public boolean updateEmlPath(long id, String fileName) {
+        if (!emlSupported) {
+            return false;
+        }
+        try {
+            jdbcTemplate.update(sql.get("spamreport.updateEmlPath"), fileName, id);
+            return true;
+        } catch (RuntimeException e) {
+            log.warn("신고 #{} EML 경로 저장 실패: {}", id, e.getMessage());
+            return false;
         }
     }
 
@@ -76,6 +98,42 @@ public class SpamReportDao {
             jdbcTemplate.update(sql.get("spamreport.updateReason"), reason, id);
         } catch (RuntimeException e) {
             log.warn("신고 #{} 사유 저장 실패: {}", id, e.getMessage());
+        }
+    }
+
+    /** 신고 목록에 보관된 메일 원본(EML) 파일 이름을 채운다. */
+    public void attachEmlPaths(List<SpamReport> reports) {
+        if (!emlSupported || reports == null || reports.isEmpty()) {
+            return;
+        }
+        try {
+            Map<Long, String> paths = jdbcTemplate.query(sql.get("spamreport.findEmlPaths"), rs -> {
+                Map<Long, String> m = new HashMap<>();
+                int n = 0;
+                while (n++ < MAX_REASON_ROWS && rs.next()) {
+                    m.put(rs.getLong("id"), rs.getString("eml_path"));
+                }
+                return m;
+            });
+            for (SpamReport r : reports) {
+                r.setEmlPath(paths.get(r.getId()));
+            }
+        } catch (RuntimeException e) {
+            log.warn("EML 경로 조회 실패: {}", e.getMessage());
+        }
+    }
+
+    /** 신고 한 건에 보관된 메일 원본(EML) 파일 이름을 채운다. */
+    public void attachEmlPath(SpamReport report) {
+        if (!emlSupported || report == null || report.getId() == null) {
+            return;
+        }
+        try {
+            List<String> rows = jdbcTemplate.query(sql.get("spamreport.findEmlPath"),
+                    (rs, i) -> rs.getString(1), report.getId());
+            report.setEmlPath(rows.isEmpty() ? null : rows.get(0));
+        } catch (RuntimeException e) {
+            log.warn("신고 #{} EML 경로 조회 실패: {}", report.getId(), e.getMessage());
         }
     }
 

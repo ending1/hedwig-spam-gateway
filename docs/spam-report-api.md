@@ -104,6 +104,27 @@ curl -X POST http://10.30.9.146:18093/report \
 
 설정은 `gateway.spam-report.*`(`application.yml`)가 초기값이고, 대시보드나 아래 API로 바꾼 값은 `settings-file`(기본 `spam-report-settings.json`, 게이트웨이 실행 디렉터리 기준)에 저장되어 재시작 후에도 우선한다. 자동 룰은 대시보드 룰 관리 탭에서 언제든 비활성화/삭제할 수 있다.
 
+### 메일 원본(EML) 업로드 — 관리자가 신고된 메일을 직접 보기 위해
+
+신고(`POST /report`)를 접수한 뒤 응답의 `id`로 원본 메일을 올린다. 원본 EML은 LLM(Gemini)으로 보내지 않고, 관리자가 대시보드에서 내려받아 확인하는 용도로만 보관한다.
+
+| 항목 | 값 |
+|---|---|
+| 엔드포인트 | `POST /report/{id}/eml` |
+| 인증 | `X-Report-Key` (신고 접수와 같은 키) |
+| 본문 | 메일 원본 바이트 그대로(`Content-Type: message/rfc822` 또는 `application/octet-stream`). 첨부 포함 |
+| 크기 | 최대 `gateway.spam-report.eml-max-bytes`(기본 10MB). 초과 시 `413` |
+| 횟수 | 신고당 1회. 이미 있으면 `409`, 신고가 없으면 `404`, 비어 있으면 `400`, 보관 불가(컬럼/디렉터리 문제)면 `503` |
+| 성공 | `201 {"id":12,"size":3456}` |
+
+- 파일은 `gateway.spam-report.eml-dir`에 `{신고ID}.eml`로 저장되고, DB(`hw_spam_report.eml_path`)에는 **파일 이름만** 기록한다. 여러 인스턴스를 운영하면 모든 인스턴스가 같은 공유 경로를 가리키게 설정한다.
+- 자동 삭제는 하지 않는다. 개인정보가 들어 있으므로 서버 쪽 정리 정책(보관 기간)은 운영 기준에 맞춰 별도로 정한다.
+- EML 업로드가 실패해도 신고 접수 자체는 이미 성공한 상태이므로, 그룹웨어는 사용자 흐름을 막지 않는다.
+
+### 메일 원본(EML) 다운로드 (관리자)
+
+`GET /admin/spam-reports/{id}/eml` (대시보드 로그인 세션 또는 `X-Admin-Key`). 신고 키로는 받을 수 없다. 스팸 메일은 악성 HTML/첨부를 담을 수 있어 화면에 렌더링하지 않고 **항상 첨부 파일(`application/octet-stream`, `nosniff`)** 로만 내려준다. 대시보드 신고 목록에서 원본이 보관된 건에 `EML 다운로드` 버튼이 보이고, 받은 파일은 메일 클라이언트(Outlook 등)로 연다. 다운로드할 때마다 서버 로그에 신고 ID와 IP가 남는다. 목록 API(`GET /admin/spam-reports`)의 `hasEml`로 보관 여부를 알 수 있다.
+
 ### 관리자 API (대시보드 로그인 세션 또는 `X-Admin-Key`)
 
 대시보드 ID/PW 로그인 후에는 세션 쿠키로 호출된다(변경 요청은 `X-CSRF-Token` 필요, 대시보드가 자동 처리). 스크립트는 `X-Admin-Key` 헤더를 쓴다. 로그인: `POST /admin/login`(`username`, `password`), `POST /admin/logout`, `GET /admin/session`.

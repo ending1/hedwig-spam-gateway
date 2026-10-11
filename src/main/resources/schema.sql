@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS hw_spam_report (
     subject VARCHAR(200),
     snippet VARCHAR(500),
     reporter_reason VARCHAR(500),
+    eml_path VARCHAR(255),
     status VARCHAR(20) NOT NULL,
     llm_verdict VARCHAR(10),
     llm_score DOUBLE DEFAULT 0,

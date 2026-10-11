@@ -5,6 +5,7 @@ CREATE TABLE hw_spam_report (
   from_domain        VARCHAR(255),
   subject            VARCHAR(200),
   snippet            VARCHAR(500),
+  eml_path           VARCHAR(255),
   reporter_reason    VARCHAR(500),
   status             VARCHAR(20) NOT NULL COMMENT 'PENDING|ANALYZED|RULE_APPROVED|DISMISSED',
   llm_verdict        VARCHAR(10),

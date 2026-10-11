@@ -100,6 +100,10 @@ gateway:
     auto-max-per-day: 20        # 24시간 자동 추가 룰 개수 상한
     auto-dismiss-ham: true      # 확신도 높은 정상 판정은 자동 기각
     settings-file: spam-report-settings.json
+    # 신고된 메일 원본(EML) 보관. 파일은 "{신고ID}.eml"로 저장하고 DB(eml_path)에는 파일 이름만 둔다.
+    # 여러 인스턴스를 운영하면 모든 인스턴스가 같은 공유 경로(NFS 등)를 가리키게 한다. 자동 삭제는 하지 않는다.
+    eml-dir: /home/egov/hedwig_spam_prod/data/eml
+    eml-max-bytes: 10485760     # 원본 최대 크기(기본 10MB). 넘으면 413
   admin:
     # 대시보드 ID/PW 로그인 계정. password-hash는 BCrypt 해시(만드는 법은 docs/HANDOVER.md "관리자 로그인").
     # users를 비우면 웹 로그인은 꺼지고 API 키 입력 방식만 쓴다.

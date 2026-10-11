@@ -26,6 +26,8 @@ public class SpamReport {
     private final long createdAtMillis;
     /** 신고자가 직접 적은 사유(선택, 마스킹됨). 목록 조회 시 별도로 채워진다. */
     private String reporterReason;
+    /** 보관된 메일 원본(EML) 파일 이름. 없으면 null. */
+    private String emlPath;
 
     public SpamReport(Long id, String reporter, String fromDomain, String subject, String snippet, String status,
                       String llmVerdict, double llmScore, String llmReason, String suggestedPattern,
@@ -60,4 +62,7 @@ public class SpamReport {
     public long getCreatedAtMillis() { return createdAtMillis; }
     public String getReporterReason() { return reporterReason; }
     public void setReporterReason(String reporterReason) { this.reporterReason = reporterReason; }
+    public String getEmlPath() { return emlPath; }
+    public void setEmlPath(String emlPath) { this.emlPath = emlPath; }
+    public boolean hasEml() { return emlPath != null && !emlPath.isEmpty(); }
 }

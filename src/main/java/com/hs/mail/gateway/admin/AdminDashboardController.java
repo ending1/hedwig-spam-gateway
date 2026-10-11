@@ -317,6 +317,7 @@ public class AdminDashboardController {
                 "    <td>${r.ragAdded ? '사용 중' : '-'}</td>\n" +
                 "    <td>\n" +
                 "      <button data-act=\"approve\" data-id=\"${r.id}\">룰 추가</button>\n" +
+                "      ${r.hasEml ? '<button data-act=\"eml\" data-id=\"' + r.id + '\">EML 다운로드</button>' : ''}\n" +
                 "      <button data-act=\"reanalyze\" data-id=\"${r.id}\">LLM 재분석</button>\n" +
                 "      <button data-act=\"rag\" data-id=\"${r.id}\">${r.ragAdded ? 'RAG 제외' : 'RAG 추가'}</button>\n" +
                 "      <button class=\"danger\" data-act=\"dismiss\" data-id=\"${r.id}\">기각</button>\n" +
@@ -334,6 +335,12 @@ public class AdminDashboardController {
                 "    const res = await adminFetch(`/admin/spam-reports/${id}/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pattern, weight: w }) });\n" +
                 "    if (!res.ok) { const b = await res.json(); alert(b.error || '룰을 추가하지 못했습니다'); return; }\n" +
                 "    loadRules();\n" +
+                "  } else if (btn.dataset.act === 'eml') {\n" +
+                "    const eres = await adminFetch(`/admin/spam-reports/${id}/eml`);\n" +
+                "    if (!eres.ok) { alert('메일 원본(EML)을 내려받지 못했습니다'); return; }\n" +
+                "    const blob = await eres.blob();\n" +
+                "    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'spam-report-' + id + '.eml';\n" +
+                "    document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 1000);\n" +
                 "  } else if (btn.dataset.act === 'reanalyze') {\n" +
                 "    btn.disabled = true; btn.textContent = '분석 중...';\n" +
                 "    const res = await adminFetch(`/admin/spam-reports/${id}/reanalyze`, { method: 'POST' });\n" +

@@ -10,6 +10,15 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.file.FileAlreadyExistsException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -311,13 +320,119 @@ public class SpamReportService {
     public List<SpamReport> list() {
         List<SpamReport> rows = dao.findRecent(MAX_LIST);
         dao.attachReasons(rows);
+        dao.attachEmlPaths(rows);
         return rows;
     }
 
     public SpamReport get(long id) {
         SpamReport r = dao.find(id);
         dao.attachReason(r);
+        dao.attachEmlPath(r);
         return r;
+    }
+
+    /** 메일 원본(EML) 저장 결과. */
+    public enum EmlStatus { STORED, NOT_FOUND, EXISTS, TOO_LARGE, EMPTY, UNAVAILABLE }
+
+    public static final class EmlStoreResult {
+        private final EmlStatus status;
+        private final long size;
+
+        EmlStoreResult(EmlStatus status, long size) {
+            this.status = status;
+            this.size = size;
+        }
+
+        public EmlStatus getStatus() { return status; }
+        public long getSize() { return size; }
+    }
+
+    private Path emlDirectory() {
+        return Paths.get(properties.getSpamReport().getEmlDir()).toAbsolutePath().normalize();
+    }
+
+    /**
+     * 신고된 메일 원본(EML)을 보관한다. 파일은 "{신고ID}.eml"로 저장하고 DB에는 파일 이름만 기록한다.
+     * 신고당 한 번만 올릴 수 있고(이미 있으면 EXISTS), 크기 상한(eml-max-bytes)을 넘으면 TOO_LARGE.
+     * 임시 파일에 쓴 뒤 옮기므로 중간에 끊겨도 반쪽 파일이 남지 않는다.
+     */
+    public EmlStoreResult storeEml(long id, InputStream in) throws IOException {
+        SpamReport r = get(id);
+        if (r == null) {
+            return new EmlStoreResult(EmlStatus.NOT_FOUND, 0);
+        }
+        if (!dao.isEmlSupported()) {
+            return new EmlStoreResult(EmlStatus.UNAVAILABLE, 0);
+        }
+        if (r.hasEml()) {
+            return new EmlStoreResult(EmlStatus.EXISTS, 0);
+        }
+        long max = properties.getSpamReport().getEmlMaxBytes();
+        Path dir = emlDirectory();
+        Files.createDirectories(dir);
+        String name = id + ".eml";
+        Path target = dir.resolve(name);
+        Path tmp = dir.resolve(name + ".tmp");
+        long size = 0;
+        boolean tooLarge = false;
+        try (OutputStream out = Files.newOutputStream(tmp, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING,
+                StandardOpenOption.WRITE)) {
+            byte[] buf = new byte[8192];
+            int n;
+            while ((n = in.read(buf)) != -1) {
+                size += n;
+                if (size > max) {
+                    tooLarge = true;
+                    break;
+                }
+                out.write(buf, 0, n);
+            }
+        } catch (IOException e) {
+            Files.deleteIfExists(tmp);
+            throw e;
+        }
+        if (tooLarge) {
+            Files.deleteIfExists(tmp);
+            return new EmlStoreResult(EmlStatus.TOO_LARGE, size);
+        }
+        if (size == 0) {
+            Files.deleteIfExists(tmp);
+            return new EmlStoreResult(EmlStatus.EMPTY, 0);
+        }
+        try {
+            Files.move(tmp, target, StandardCopyOption.ATOMIC_MOVE);
+        } catch (FileAlreadyExistsException e) {
+            Files.deleteIfExists(tmp);
+            return new EmlStoreResult(EmlStatus.EXISTS, 0);
+        } catch (IOException e) {
+            Files.deleteIfExists(tmp);
+            throw e;
+        }
+        if (!dao.updateEmlPath(id, name)) {
+            Files.deleteIfExists(target);
+            return new EmlStoreResult(EmlStatus.UNAVAILABLE, 0);
+        }
+        log.info("스팸 신고 #{} 메일 원본 보관: {} bytes", id, size);
+        return new EmlStoreResult(EmlStatus.STORED, size);
+    }
+
+    /** 보관된 메일 원본(EML) 파일을 돌려준다. 없거나 DB의 파일 이름이 안전하지 않으면 null. */
+    public Path findEml(long id) {
+        SpamReport r = get(id);
+        if (r == null || !r.hasEml()) {
+            return null;
+        }
+        String name = r.getEmlPath();
+        if (!name.matches("[0-9]+[.]eml")) {
+            log.warn("스팸 신고 #{} 의 EML 파일 이름이 올바르지 않아 무시합니다", id);
+            return null;
+        }
+        Path dir = emlDirectory();
+        Path file = dir.resolve(name).normalize();
+        if (!file.startsWith(dir) || !Files.isRegularFile(file)) {
+            return null;
+        }
+        return file;
     }
 
     /** 관리자 승인: 룰(KEYWORD)을 추가하고 신고를 RULE_APPROVED로 표시한다. */
