@@ -86,7 +86,7 @@ curl -X DELETE http://localhost:8090/admin/spam-rules/42
 
 ### 8. 관리자 통계 대시보드
 - `GET /admin/dashboard`에서 커넥션/밴/스팸판정/RBL/그레이리스팅/아웃바운드 지표를 5초 주기로 갱신되는 카드로 표시
-- 같은 화면에서 화이트/블랙리스트 추가·삭제도 가능 (별도 프론트엔드 빌드 없이 순수 HTML/JS)
+- 탭 구성: **룰 관리 / 스팸 신고 / 화이트·블랙리스트**. 관리자 키 입력란 제공(설정된 경우). 별도 프론트엔드 빌드 없이 순수 HTML/JS
 
 ### 8-1. LLM 판정용 RAG (선택, 기본 꺼짐)
 - `gateway.spam-filter.rag.enabled=true` + `examples-file`(JSONL)을 주면, LLM(Gemini/Claude/Gemma) 판정 프롬프트에 **과거에 스팸으로 확인된 유사 사례**(문자 3-gram TF-IDF 검색, 외부 임베딩 API 없음)를 근거로 붙인다. 유사도 `min-similarity` 미만이면 사례를 붙이지 않는다.
@@ -94,6 +94,30 @@ curl -X DELETE http://localhost:8090/admin/spam-rules/42
 - **측정 결과(2026-09-26, 사내 2개월 코퍼스, Gemini 3.5 Flash-Lite)**: 룰이 못 잡은 미사용 스팸 캠페인 200건에서 RAG 없음 89.5~90.0% → RAG 사용 89.0~89.5%로 **차이가 없었다**(두 번 실행). Gemini가 이미 대부분을 잡아 개선 여지가 작았다. 따라서 **기본값은 꺼짐**이고, 켜야 할 근거(자사 정책에 특화된 판정 등)가 생겼을 때 다시 평가해 켠다.
 - 이 수치를 해석할 때의 주의: 코퍼스의 "스팸" 라벨은 노이즈가 크다. Gemini가 "정상"으로 본 20건은 OpenAI/PAYCO 로그인 알림, 뉴스레터, 업무 협조 메일 등 실제로 정상에 가까웠고, "정상 대용"으로 넣은 microsoft.com 발신 중 6건은 실제로는 microsoft.com을 사칭한 피싱("Windows Defender flagged active spyware")이라 Gemini가 정확히 잡은 것이었다. 즉 90%는 실제 재현율의 하한이고 오탐률(9/60)은 신뢰할 수 없다. 발신 도메인만으로 ham 라벨을 붙이면 사칭 메일이 섞인다.
 - 평가 중 발견한 함정: 마케팅 메일이 미리보기 뒤를 채우는 투명 문자(U+034F 등) 패딩 때문에 무관한 메일끼리 유사도 0.6~0.7이 나왔다. 유사도 계산 전 투명 문자를 제거하고 n-gram tf에 상한을 둔다.
+
+### 8-2. 룰별 적중 통계와 LLM 가중치 조언
+- 룰이 적중할 때마다 메모리에서 집계했다가 주기적으로 DB(`hw_spam_rule_stat`, `hw_spam_rule_sample`)에 저장한다. 샘플은 이메일/긴 숫자를 가린 발췌만, 룰당 최근 10건.
+- 대시보드 "룰 관리" 탭의 **분석** 버튼 → 샘플과 LLM 조언(유지/상향/하향/비활성, 권장 가중치, 신뢰도, 근거)을 팝업으로 표시. 조언은 참고용이며 "권장 가중치 적용"을 눌러 확인해야만 반영된다.
+- API: `GET /admin/spam-rules/stats`, `GET /admin/spam-rules/{id}/samples`, `POST /admin/spam-rules/{id}/advice`
+
+### 8-3. 사용자 스팸 신고 (LLM 판정)
+- 그룹웨어가 `POST /report`(`X-Report-Key`)로 신고를 전달하면 즉시 202로 접수하고, LLM이 비동기로 스팸/정상/불확실, 의견, 룰 후보 정규식을 판정한다.
+- 스팸이고 확신도 0.8 이상이면 RAG 사례로 자동 편입한다. 룰 추가는 **처리 방식 옵션**에 따른다: **수동(기본)** 은 관리자가 "스팸 신고" 탭에서 승인해야만 반영, **자동**은 확신도 기준(기본 90%) 이상일 때만 처리하며 제안 정규식이 신고 메일에 실제로 매칭되어야 하고, 가중치 상한(기본 2.0)·일일 추가 상한(기본 20)·중복 방지가 적용된다.
+- 신고자는 선택적으로 신고 사유(`reason`)를 보낼 수 있고, 메일 원본은 `POST /report/{id}/eml`로 따로 올리면 관리자만 내려받아 볼 수 있다(LLM으로는 보내지 않는다).
+- 명세: [docs/spam-report-api.md](docs/spam-report-api.md)
+
+### 8-4. 보안
+- 대시보드는 **ID/PW 로그인**(BCrypt 해시 계정, HttpOnly·SameSite=Strict 세션 쿠키 + CSRF 토큰, 연속 실패 시 잠금). 스크립트/서버 간 호출은 `X-Admin-Key`.
+- 외부에서 들어온 메일의 **위조 `X-Spam-*` 헤더는 판정 전에 제거**한다. Hedwig는 `X-Spam-Flag`로 스팸 편지함 이동을 결정하므로, 위조 헤더가 그대로 통과하면 안 된다.
+- 화이트/블랙리스트는 RCPT 단계에서 그레이리스팅보다 먼저 확인한다.
+
+### 8-5. 데이터베이스 (H2 / Oracle / MariaDB)
+- 기본은 인메모리 H2. 운영은 `gateway.db-dialect`와 `spring.datasource.*`로 **Oracle 19c**(운영 검증) 또는 MariaDB(스크립트만 제공, 미검증)를 쓴다. 드라이버 ojdbc8 21.17 / mariadb-java-client 2.7.2 포함.
+- 스키마는 `src/main/sql/{oracle,mariadb,mssql}/`, 접속 예시는 `deploy/conf/application-prod-oracle.example.yml`. 외부 DB에서는 `spring.sql.init.mode: never`.
+- 외부 DB를 쓰면 룰, 그레이리스트, 통계를 여러 인스턴스가 공유할 수 있다(H2 파일 모드는 단일 프로세스만).
+
+### 문서
+- [인수인계](docs/HANDOVER.md) · [스팸 신고 API](docs/spam-report-api.md) · [소개/시연 PPT](docs/hedwig-spam-gateway-intro.pptx)
 
 ### 9. 아웃바운드 DKIM 서명
 - 이 게이트웨이를 거쳐 나가는 발신 메일에 `DKIM-Signature` 헤더를 추가 (RFC 6376, relaxed/relaxed 정규화, rsa-sha256)
