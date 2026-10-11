@@ -36,7 +36,7 @@ public class SpamReportController {
         this.guard = guard;
     }
 
-    /** body: reporter(신고자), from(발신자 주소), subject, body(본문 텍스트/HTML). 접수 즉시 202. */
+    /** body: reporter(신고자), from(발신자 주소), subject, body(본문 텍스트/HTML), reason(신고 사유, 선택). 접수 즉시 202. */
     @PostMapping("/report")
     public ResponseEntity<?> report(@RequestHeader(value = "X-Report-Key", required = false) String reportKey,
                                      @RequestHeader(value = "X-Admin-Key", required = false) String adminKey,
@@ -52,7 +52,7 @@ public class SpamReportController {
         if (text.length() > MAX_BODY_CHARS) {
             text = text.substring(0, MAX_BODY_CHARS);
         }
-        long id = service.submit(str(body.get("reporter")), str(body.get("from")), subject, text);
+        long id = service.submit(str(body.get("reporter")), str(body.get("from")), subject, text, str(body.get("reason")));
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("id", id);
         res.put("status", SpamReport.PENDING);
@@ -187,6 +187,7 @@ public class SpamReportController {
         m.put("fromDomain", r.getFromDomain());
         m.put("subject", r.getSubject());
         m.put("snippet", r.getSnippet());
+        m.put("reporterReason", r.getReporterReason());
         m.put("status", r.getStatus());
         m.put("verdict", r.getLlmVerdict());
         m.put("score", r.getLlmScore());

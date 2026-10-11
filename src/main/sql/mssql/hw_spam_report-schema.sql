@@ -5,6 +5,7 @@ CREATE TABLE hw_spam_report (
   from_domain        NVARCHAR(255),
   subject            NVARCHAR(200),
   snippet            NVARCHAR(500),
+  reporter_reason    NVARCHAR(500),
   status             VARCHAR(20) NOT NULL,
   llm_verdict        VARCHAR(10),
   llm_score          FLOAT DEFAULT 0,

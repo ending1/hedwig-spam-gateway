@@ -19,7 +19,7 @@ RBL → 그레이리스팅(운영 5분) → 화이트/블랙리스트 → 룰기
 | 대시보드(탭: 룰 관리/스팸 신고/화이트·블랙리스트) | `/admin/dashboard`, 포트 18093 |
 | 룰 CRUD | `/admin/spam-rules` (+ `/stats`, `/{id}/samples`, `/{id}/advice`) |
 | 룰별 적중 통계·마스킹 샘플 + LLM 가중치 조언 | `RuleStatService`, `RuleAdvisorService` (조언만, 적용은 사람이) |
-| 사용자 스팸 신고 | `POST /report`(`X-Report-Key`), 관리 `/admin/spam-reports/**` |
+| 사용자 스팸 신고 | `POST /report`(`X-Report-Key`, 선택 필드 `reason`=신고 사유), 관리 `/admin/spam-reports/**` |
 | 메일 리스트 | `/admin/mail-list` |
 - **대시보드는 ID/PW 로그인**(`/admin/dashboard`). 로그인하면 HttpOnly·SameSite=Strict 세션 쿠키 + CSRF 토큰을 쓰고, 연속 5회 실패하면 해당 IP+ID를 5분 잠근다. 세션은 서버 메모리라 게이트웨이를 재시작하면 다시 로그인한다.
 - 관리자 API는 로그인 세션 **또는** `X-Admin-Key`(스크립트/서버 간 호출용)로 인증, 신고 접수는 별도 `X-Report-Key`. 신고 API 명세는 `docs/spam-report-api.md`.

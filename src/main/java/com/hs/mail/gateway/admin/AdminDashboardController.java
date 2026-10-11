@@ -309,7 +309,7 @@ public class AdminDashboardController {
                 "  const vk = { SPAM: '스팸', HAM: '정상', UNSURE: '불확실' };\n" +
                 "  tbody.innerHTML = rows.map(r => `<tr>\n" +
                 "    <td>${r.id}</td><td>${escapeHtml(r.reporter)}</td><td>${escapeHtml(r.fromDomain)}</td>\n" +
-                "    <td><b>${escapeHtml(r.subject)}</b><br><span style=\"color:#555\">${escapeHtml((r.snippet || '').substring(0, 120))}</span></td>\n" +
+                "    <td><b>${escapeHtml(r.subject)}</b><br><span style=\"color:#555\">${escapeHtml((r.snippet || '').substring(0, 120))}</span>${r.reporterReason ? '<br><span style=\"color:#b45309\">신고 사유: ' + escapeHtml(r.reporterReason) + '</span>' : ''}</td>\n" +
                 "    <td>${r.status === 'PENDING' ? '분석 중' : (vk[r.verdict] || '-') + ' (' + Math.round((r.score || 0) * 100) + '%)'}</td>\n" +
                 "    <td>${escapeHtml(r.reason || '')}</td>\n" +
                 "    <td>${r.suggestedPattern ? '<code>' + escapeHtml(r.suggestedPattern) + '</code> (' + r.suggestedWeight + ')' : '-'}</td>\n" +
