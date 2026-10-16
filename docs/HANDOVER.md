@@ -97,3 +97,10 @@ gateway:
 - 챗 룰 변경은 `ChangeService`(제안 10분 유효·1회용·본인만, 적용 시 상태 재확인) + `AuditService`(hw_admin_audit, Oracle 생성 완료)로 구현됨.
 - 다음 단계(미구현): SPF/DKIM/DMARC 수신 검증, 메일 격리/원문 열람, kube에 `qwen3:30b` 등 추가 모델 설치 후 비교(다운로드는 사용자 승인 필요).
 - 알려진 한계: 룰 조회 키워드는 패턴·사유에 대한 단순 문자열 매칭이라 의미 검색이 아니다(예: "협박"으로 영문 패턴 룰은 못 찾음).
+
+## 발신 인증 SPF/DKIM/DMARC (2026-10-16 추가)
+- 패키지 `com.hs.mail.gateway.auth`: `SpfChecker`, `DkimVerifier`, `DmarcChecker`, `AuthChecker`(조합, 메일당 시간 상한), `DnsJavaLookup`(dnsjava). 연결 지점은 `InboundFilterFrontHandler.classifyAndForward`(화이트/블랙리스트 처리 뒤, 룰 평가 전, DNS가 블로킹이라 classifierExecutor에서 수행) → `AuthResult`를 `SpamCheckRequest.withAuth`로 룰기반 필터에 전달 → `Authentication-Results` 헤더 부착.
+- 점수는 `hw_spam_rule` STRUCTURAL `auth-*` 6개 행(기동 시 없으면 자동 추가). 이벤트 로그 `hw_mail_event`에 `spf_result/dkim_result/dmarc_result` 컬럼(기존 테이블은 기동 시 ALTER로 추가, egov Oracle 적용 완료).
+- `tools/AuthCorpusCheck.java`: EML 폴더로 검증기를 점검하는 개발용 도구. 2개월 된 사내 스팸 표본 120건에서 DKIM 서명 19건 중 12건이 pass였고, 나머지는 서명 만료(보관 메일이라 정상), 공개키 없음, 본문 변형(보관 과정에서 끝에 제어문자가 붙은 경우는 직접 확인) 등이었다. 이 표본의 SPF/DMARC 수치는 접속 IP를 Received 헤더로 근사해 신뢰할 수 없다.
+- 주의: 테스트에서 실제 브랜드 도메인(paypal.com)을 발신자로 쓰면 Hedwig가 존재하지 않는 수신자에 대한 반송 메일(backscatter)을 그 도메인으로 실제 발송한다. 시험에는 예약 도메인(`*.example`, `*.test`)이나 발송 가능한 수신자를 쓸 것.
+- 알려진 위험: 메일링 리스트/전달 메일은 정당해도 DMARC가 실패해 스팸 태그가 붙을 수 있다. 통계로 확인하며 `auth-dmarc-fail-reject` 등의 가중치를 조정한다.

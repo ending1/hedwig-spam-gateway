@@ -131,6 +131,13 @@ curl -X DELETE http://localhost:8090/admin/spam-rules/42
 - 적용 시점에 룰 상태를 다시 확인해 그 사이 바뀌었으면 거부하고, 패턴(정규식 컴파일, 정상 문장에 걸리는 범용 패턴 거부)과 가중치(0~10)를 서버가 다시 검증한다. 허용 동작은 네 가지뿐이다.
 - 모든 변경(챗 및 룰 화면/REST)은 `hw_admin_audit`에 누가·어디서·무엇을(전→후) 남기고 챗 탭에서 최근 이력을 본다. API: `POST /admin/chat/proposals/{id}/apply|cancel`, `GET /admin/audit`
 
+### 8-9. 수신 메일 발신 인증 (SPF / DKIM / DMARC)
+- 받은 메일마다 SPF(RFC 7208), DKIM(RFC 6376), DMARC(RFC 7489)를 검증해 결과를 `Authentication-Results` 헤더로 붙인다. 외부가 같은 헤더를 위조해 넣은 것은 판정 전에 제거한다. 외부 라이브러리 없이 dnsjava 조회만 쓴다.
+- 결과는 `auth-*` 구조 룰 점수로 반영된다(대시보드 룰 표에서 가중치 조정/끄기 가능): DMARC 실패는 도메인 정책별로 reject 5.0 / quarantine 3.0 / none 1.0, SPF fail 2.0 / softfail 1.0, DKIM 서명이 있는데 실패 1.5. **차단하지 않고 점수와 헤더 태그만** 하며, DNS 오류·시간 초과(메일당 6초 상한)는 temperror로 감점 없이 통과(fail-open).
+- 이벤트 로그에 SPF/DKIM/DMARC 결과가 남고 통계·로그 탭의 인증 표, `GET /admin/stats/auth`, AI 챗("오늘 사칭 메일 현황")으로 볼 수 있다.
+- 설정: `gateway.auth.enabled`(기본 true), `timeout-millis`(6000), `dns-timeout-millis`(2000).
+- 한계: DKIM은 게이트웨이가 줄 단위 문자열로 받은 메일 기준이라 8bit 원문이 깨진 메일(U+FFFD)은 검증하지 않고 neutral로 둔다. SPF의 `ptr` 메커니즘은 일치하지 않는 것으로 처리한다. DMARC 조직 도메인은 자주 쓰는 다단계 접미사(.co.kr 등)만 내장했고 pct 샘플링은 적용하지 않는다. 메일링 리스트·전달(forward) 메일은 정당해도 DMARC가 실패할 수 있으니, 도입 초기에는 통계를 보며 가중치를 조정한다.
+
 ### 문서
 - [인수인계](docs/HANDOVER.md) · [스팸 신고 API](docs/spam-report-api.md) · [소개/시연 PPT](docs/hedwig-spam-gateway-intro.pptx)
 
