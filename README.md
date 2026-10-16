@@ -147,6 +147,11 @@ curl -X DELETE http://localhost:8090/admin/spam-rules/42
 ### 8-11. 수신자 도메인 정책 (릴레이 차단)
 - Hedwig의 릴레이 제한(`mynetworks`)은 게이트웨이가 앞에 서면 모든 외부 접속을 127.0.0.1로 보게 되어 무력화된다(외부 도메인 RCPT가 수락됨을 확인). 그래서 게이트웨이가 RCPT 단계에서 `gateway.recipient.local-domains`에 없는 도메인을 `relay-networks` 밖의 접속에 `554 5.7.1`로 거부한다. 도메인 목록이 비면 꺼진 것과 같다. 없는 사용자 거절은 Hedwig가 한다.
 
+### 8-12. 보류 메일 일일 요약 메일
+- 보류된 메일은 확인하지 않으면 보관 기간(`hold-retention-days`) 뒤 영구 삭제되므로, 매일 정해진 시각에 관리자에게 요약 메일을 보낸다: 보류 중인 메일(최신순, 발신자·수신자·제목·점수), **곧 삭제될 보류 메일 경고**, 전날 처리 현황과 스팸 상위 발신 도메인, 대시보드 안내. 보류 메일이 없으면 보내지 않는다(`send-when-empty`로 변경).
+- 설정 `gateway.digest.*`: `enabled`(기본 꺼짐), `recipients`(Hedwig가 받는 우리 도메인 주소), `from`, `cron`(기본 매일 09:00), `dashboard-url`, `max-items`, `expiry-warn-days`. Hedwig 백엔드로 직접 전달하므로 스팸 검사를 거치지 않고, 제목은 RFC 2047, 본문은 base64 UTF-8이다. 여러 인스턴스가 같은 DB를 쓰면 인스턴스마다 보내므로 한 곳에서만 켠다.
+- 대시보드 격리함 탭의 "일일 요약 미리보기", "요약 메일 지금 보내기"(`GET /admin/quarantine/digest/preview`, `POST /admin/quarantine/digest/send`). 발송은 변경 이력에 남는다.
+
 ### 문서
 - [인수인계](docs/HANDOVER.md) · [스팸 신고 API](docs/spam-report-api.md) · [소개/시연 PPT](docs/hedwig-spam-gateway-intro.pptx)
 

@@ -124,3 +124,7 @@ gateway:
 - 보류 메일은 `hold-retention-days`(기본 30일)가 지나면 **영구 삭제**된다. 운영에서는 관리자가 주기적으로 확인하는 절차(또는 알림)를 정해야 한다. 상태: HELD(보류 중, 미전달) / QUARANTINED(사본, 이미 전달됨) / RELEASED.
 - egov 설정: `hold-enabled: true`, `hold-min-score: 0.8`. 끄려면 `hold-enabled: false` 후 재기동.
 - 통합 시험은 연결을 여러 번 받는 fake Hedwig(`MultiHedwigServer`, InboundFilterFrontHandlerTest 안)로 한다.
+
+## 보류 요약 메일 (2026-10-16 추가)
+- `DigestService`(`quarantine` 패키지): `@Scheduled(cron = "${gateway.digest.cron:0 0 9 * * *}")`, 내용은 `QuarantineService`(보류 목록·개수·임박 개수)와 `MailEventService`(전날 현황)로 구성, 발송은 `QuarantineService.deliver`(Hedwig 백엔드 SMTP 직접). 수동: `/admin/quarantine/digest/{preview,send}`.
+- egov: `gateway.digest.enabled: false`(수신자는 시험 계정 `t11111t@egov.handysoft.co.kr`). **실제 관리자 주소로 바꾸고 `enabled: true`로 켜야 매일 발송된다.** 수신자가 Hedwig의 우리 도메인 주소가 아니면 Hedwig가 거절/릴레이하므로 외부 주소(gmail 등)는 이 방식으로 보낼 수 없다.
