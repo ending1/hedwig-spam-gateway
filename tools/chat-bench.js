@@ -1,5 +1,6 @@
 // AI 챗 의도/값 분류 정확도 측정 도구(개발용). 사용: node tools/chat-bench.js http://localhost:18099  (관리자 키가 필요하면 환경변수 ADMIN_KEY)
 // 서버가 검증한 값(기간/항목/개수/번호/동작)으로 채점한다. 모델/프롬프트를 바꾼 뒤 회귀 확인에 쓴다. 이벤트 검색 문항의 기대 값은 sender/ip/action이다.
+const BASE = (process.argv[2] || "http://localhost:18099").replace(/[/]+$/, "");
 
 // [질문, 기대 의도, 기대 값(일부만 검사)]
 const DAY = 86400000;
