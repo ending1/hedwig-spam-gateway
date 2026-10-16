@@ -73,7 +73,7 @@ public class QuarantineService {
         public final long sizeBytes;
         public final String emlFile;
 
-        Entry(long id, long receivedAtMillis, String clientIp, String mailFrom, String rcptList, String subject,
+        public Entry(long id, long receivedAtMillis, String clientIp, String mailFrom, String rcptList, String subject,
               double score, String filter, String reason, String auth, String status, long sizeBytes, String emlFile) {
             this.id = id;
             this.receivedAtMillis = receivedAtMillis;

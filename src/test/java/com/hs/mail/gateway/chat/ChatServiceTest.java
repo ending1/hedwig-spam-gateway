@@ -53,6 +53,7 @@ class ChatServiceTest {
     private RuleStatService ruleStats;
     private SpamReportService reports;
     private ChangeService changes;
+    private com.hs.mail.gateway.quarantine.QuarantineService quarantine;
     private com.hs.mail.gateway.audit.AuditService audit;
 
     private ChatService chat(String db) throws Exception {
@@ -66,7 +67,8 @@ class ChatServiceTest {
         reports = mock(SpamReportService.class);
         audit = new com.hs.mail.gateway.audit.AuditService(jdbc, sql);
         changes = new ChangeService(rules, audit);
-        return new ChatService(fake, events, rules, ruleStats, reports, changes, props);
+        quarantine = org.mockito.Mockito.mock(com.hs.mail.gateway.quarantine.QuarantineService.class);
+        return new ChatService(fake, events, rules, ruleStats, reports, changes, quarantine, props);
     }
 
     private ChatService.Reply ask(ChatService c, String q) throws Exception {
@@ -190,6 +192,50 @@ class ChatServiceTest {
 
         when(reports.list()).thenReturn(Collections.<SpamReport>emptyList());
         assertTrue(ask(c, "신고 있어?").answer.contains("없습니다"));
+    }
+
+    @Test
+    void 격리함_질문은_보류_건수와_최근_보류_메일을_보여_준다() throws Exception {
+        ChatService c = chat("chat8");
+        Map<String, Long> counts = new LinkedHashMap<>();
+        counts.put("HELD", 2L);
+        counts.put("QUARANTINED", 5L);
+        counts.put("RELEASED", 1L);
+        org.mockito.Mockito.when(quarantine.isEnabled()).thenReturn(true);
+        org.mockito.Mockito.when(quarantine.isHoldEnabled()).thenReturn(true);
+        org.mockito.Mockito.when(quarantine.countByStatus()).thenReturn(counts);
+        org.mockito.Mockito.when(quarantine.search(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.eq("HELD"), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(Arrays.asList(new com.hs.mail.gateway.quarantine.QuarantineService.Entry(7L, 1790000000000L, "1.1.1.1",
+                        "spam@bad.example", "u@corp.example", "무료 상품권", 0.95, "RULE", "r", "", "HELD", 100, "7.eml")));
+        modelAnswer = "{\"intent\":\"QUARANTINE_SUMMARY\",\"params\":{\"status\":\"HELD\"}}";
+
+        ChatService.Reply r = ask(c, "보류된 메일 몇 건이야?");
+
+        assertEquals("QUARANTINE_SUMMARY", r.intent);
+        assertTrue(r.answer.contains("보류 중(받는 사람에게 전달되지 않음) 2건"), r.answer);
+        assertTrue(r.answer.contains("사본(스팸 태그로 전달됨) 5건"), r.answer);
+        assertEquals(1, r.rows.size());
+        assertEquals("spam@bad.example", r.rows.get(0).get(2));
+        assertEquals("HELD", r.rows.get(0).get(5));
+    }
+
+    @Test
+    void 격리함이_꺼져_있거나_보류가_없으면_그대로_알려_준다() throws Exception {
+        ChatService c = chat("chat9");
+        org.mockito.Mockito.when(quarantine.isEnabled()).thenReturn(false);
+        modelAnswer = "{\"intent\":\"QUARANTINE_SUMMARY\",\"params\":{}}";
+        assertTrue(ask(c, "격리함 현황").answer.contains("꺼져 있습니다"));
+
+        org.mockito.Mockito.when(quarantine.isEnabled()).thenReturn(true);
+        org.mockito.Mockito.when(quarantine.isHoldEnabled()).thenReturn(false);
+        org.mockito.Mockito.when(quarantine.countByStatus()).thenReturn(new LinkedHashMap<String, Long>());
+        org.mockito.Mockito.when(quarantine.search(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.anyInt()))
+                .thenReturn(Collections.<com.hs.mail.gateway.quarantine.QuarantineService.Entry>emptyList());
+        ChatService.Reply r = ask(c, "보류된 메일 있어?");
+        assertTrue(r.answer.contains("보류 중인 메일은 없습니다"), r.answer);
+        assertTrue(r.answer.contains("보류 기능은 꺼져 있어"), r.answer);
     }
 
     @Test

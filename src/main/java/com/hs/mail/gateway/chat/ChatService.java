@@ -65,12 +65,15 @@ public class ChatService {
     private final SpamRuleService rules;
     private final RuleStatService ruleStats;
     private final SpamReportService reports;
+    private final com.hs.mail.gateway.quarantine.QuarantineService quarantine;
     private final GatewayProperties.Chat config;
     private final ChangeService changes;
 
     public ChatService(IntentModel model, MailEventService events, SpamRuleService rules, RuleStatService ruleStats,
-                       SpamReportService reports, ChangeService changes, GatewayProperties properties) {
+                       SpamReportService reports, ChangeService changes,
+                       com.hs.mail.gateway.quarantine.QuarantineService quarantine, GatewayProperties properties) {
         this.changes = changes;
+        this.quarantine = quarantine;
         this.model = model;
         this.events = events;
         this.rules = rules;
@@ -89,6 +92,7 @@ public class ChatService {
                 + "- STATS_SUMMARY: 기간별 처리 요약(정상/스팸/거부/지연 건수). params: period\n"
                 + "- STATS_TOP: 항목별 상위 N. params: dimension(domain|ip|sender|filter|recipient_domain), period, limit(기본 5), action(SPAM|REJECTED|DEFERRED|HAM|ALL, 기본 SPAM. dimension이 filter면 ALL)\n"
                 + "- STATS_TREND: 일자별 추이. params: period\n"
+                + "- QUARANTINE_SUMMARY: 격리함/보류(전달 안 된) 메일 현황 조회. params: status(HELD|ALL, 보류만 보려면 HELD, 기본 HELD)\n"
                 + "- STATS_AUTH: 발신 인증(SPF/DKIM/DMARC) 결과 분포, 사칭/위조 메일 현황. params: period\n"
                 + "- RULE_LIST: 룰 조회. params: keyword(없으면 빈 문자열)\n"
                 + "- RULE_STATS: 특정 룰의 적중 현황. params: ruleId(숫자, 특정 룰 지정이 없으면 0)\n"
@@ -137,6 +141,8 @@ public class ChatService {
                 return trend(p);
             case "STATS_AUTH":
                 return authStats(p);
+            case "QUARANTINE_SUMMARY":
+                return quarantineSummary(p);
             case "RULE_LIST":
                 return ruleList(p);
             case "RULE_STATS":
@@ -279,6 +285,37 @@ public class ChatService {
             long ham = get(e.getValue(), MailEvent.HAM), spam = get(e.getValue(), MailEvent.SPAM),
                     rej = get(e.getValue(), MailEvent.REJECTED), def = get(e.getValue(), MailEvent.DEFERRED);
             r.rows.add(Arrays.<Object>asList(e.getKey(), ham, spam, rej, def, pct(spam, ham + spam + rej + def)));
+        }
+        return r;
+    }
+
+    private Reply quarantineSummary(JsonNode p) {
+        Reply r = base("QUARANTINE_SUMMARY");
+        String status = "ALL".equalsIgnoreCase(p.path("status").asText("HELD")) ? "ALL" : "HELD";
+        r.params.put("status", status);
+        if (!quarantine.isEnabled()) {
+            r.answer = "격리함이 꺼져 있습니다(gateway.quarantine.enabled).";
+            return r;
+        }
+        Map<String, Long> counts = quarantine.countByStatus();
+        long held = get(counts, "HELD"), copy = get(counts, "QUARANTINED"), released = get(counts, "RELEASED");
+        StringBuilder a = new StringBuilder("격리함 현황입니다. 보류 중(받는 사람에게 전달되지 않음) ").append(held).append("건, 사본(스팸 태그로 전달됨) ")
+                .append(copy).append("건, 복구됨 ").append(released).append("건입니다.");
+        if (!quarantine.isHoldEnabled()) {
+            a.append(" (보류 기능은 꺼져 있어 새로 보류되는 메일은 없습니다.)");
+        }
+        List<com.hs.mail.gateway.quarantine.QuarantineService.Entry> rows = quarantine.search("2000-01-01", "2999-12-31",
+                status.equals("HELD") ? "HELD" : "ALL", "ALL", 5);
+        if (rows.isEmpty()) {
+            r.answer = a.append(status.equals("HELD") ? " 보류 중인 메일은 없습니다." : "").toString();
+            return r;
+        }
+        r.answer = a.append(" 최근 ").append(rows.size()).append("건을 보여 드립니다. 전달·삭제는 '격리함' 탭에서 합니다.").toString();
+        r.columns = Arrays.asList("ID", "시각", "발신자", "제목", "점수", "상태");
+        java.time.format.DateTimeFormatter f = java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(java.time.ZoneId.systemDefault());
+        for (com.hs.mail.gateway.quarantine.QuarantineService.Entry e : rows) {
+            r.rows.add(Arrays.<Object>asList(e.id, f.format(java.time.Instant.ofEpochMilli(e.receivedAtMillis)), cut(e.mailFrom),
+                    cut(e.subject), e.score, e.status));
         }
         return r;
     }

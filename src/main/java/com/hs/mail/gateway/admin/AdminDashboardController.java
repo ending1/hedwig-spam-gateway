@@ -339,7 +339,7 @@ public class AdminDashboardController {
                 "document.getElementById('qFind').addEventListener('click', loadQuarantine);\n" +
                 "document.getElementById('qStatus').addEventListener('change', loadQuarantine);\n" +
                 "document.getElementById('qPeriod').addEventListener('change', loadQuarantine);\n" +
-                "const CHAT_SAMPLES =['어제 스팸 몇 건이야?', '최근 7일 스팸 상위 도메인 5개', '이번 주 일별 추이', '적중 많은 룰 알려줘', '검토 대기 신고 있어?'];\n" +
+                "const CHAT_SAMPLES =['어제 스팸 몇 건이야?', '최근 7일 스팸 상위 도메인 5개', '이번 주 일별 추이', '적중 많은 룰 알려줘', '검토 대기 신고 있어?', '보류된 메일 몇 건이야?'];\n" +
                 "function chatAdd(cls, html) {\n" +
                 "  const log = document.getElementById('chatLog'); const d = document.createElement('div');\n" +
                 "  d.style.cssText = 'margin:0.4rem 0;padding:0.5rem 0.7rem;border-radius:8px;max-width:92%;' + (cls === 'me' ? 'background:#dbeafe;margin-left:auto;width:fit-content' : 'background:#f3f4f6');\n" +
