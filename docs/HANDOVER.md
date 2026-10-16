@@ -102,5 +102,11 @@ gateway:
 - 패키지 `com.hs.mail.gateway.auth`: `SpfChecker`, `DkimVerifier`, `DmarcChecker`, `AuthChecker`(조합, 메일당 시간 상한), `DnsJavaLookup`(dnsjava). 연결 지점은 `InboundFilterFrontHandler.classifyAndForward`(화이트/블랙리스트 처리 뒤, 룰 평가 전, DNS가 블로킹이라 classifierExecutor에서 수행) → `AuthResult`를 `SpamCheckRequest.withAuth`로 룰기반 필터에 전달 → `Authentication-Results` 헤더 부착.
 - 점수는 `hw_spam_rule` STRUCTURAL `auth-*` 6개 행(기동 시 없으면 자동 추가). 이벤트 로그 `hw_mail_event`에 `spf_result/dkim_result/dmarc_result` 컬럼(기존 테이블은 기동 시 ALTER로 추가, egov Oracle 적용 완료).
 - `tools/AuthCorpusCheck.java`: EML 폴더로 검증기를 점검하는 개발용 도구. 2개월 된 사내 스팸 표본 120건에서 DKIM 서명 19건 중 12건이 pass였고, 나머지는 서명 만료(보관 메일이라 정상), 공개키 없음, 본문 변형(보관 과정에서 끝에 제어문자가 붙은 경우는 직접 확인) 등이었다. 이 표본의 SPF/DMARC 수치는 접속 IP를 Received 헤더로 근사해 신뢰할 수 없다.
-- 주의: 테스트에서 실제 브랜드 도메인(paypal.com)을 발신자로 쓰면 Hedwig가 존재하지 않는 수신자에 대한 반송 메일(backscatter)을 그 도메인으로 실제 발송한다. 시험에는 예약 도메인(`*.example`, `*.test`)이나 발송 가능한 수신자를 쓸 것.
+- 주의(시험 사고 기록): 인증 시험에서 실제 브랜드 도메인(paypal.com)을 발신자로 쓰고 수신자를 우리 도메인이 아닌 곳(nobody@handysoft.co.kr)으로 했더니, Hedwig가 그 수신자를 **릴레이**하려다 상대 서버가 거부해 반송 메일을 만들었고 그 반송이 위조 발신자(paypal.com)에게 실제로 나갔다. 시험에는 예약 도메인(`*.example`, `*.test`)과 우리 도메인 수신자를 쓸 것. (Hedwig는 우리 도메인의 없는 사용자는 RCPT에서 550으로 거절한다 - 반송의 원인은 없는 사용자가 아니라 외부 도메인 릴레이였다.)
 - 알려진 위험: 메일링 리스트/전달 메일은 정당해도 DMARC가 실패해 스팸 태그가 붙을 수 있다. 통계로 확인하며 `auth-dmarc-fail-reject` 등의 가중치를 조정한다.
+
+## RCPT 단계 릴레이 차단 (2026-10-16 추가)
+- **발견한 문제**: Hedwig의 `mynetworks=127.0.0.1/8`(릴레이 허용)은 게이트웨이가 앞에 서면서 모든 외부 접속을 127.0.0.1로 보게 되어 외부 발신자에게 무력화돼 있었다. 실제로 외부 취급 IP(kube)에서 `RCPT TO:<x@example.org>`가 `250`으로 수락됐다(DATA는 보내지 않아 메일은 나가지 않음). 즉 게이트웨이를 거치면 오픈 릴레이였다.
+- **조치**: `RecipientPolicy` + `InboundFilterFrontHandler.handleRcptTo` 맨 앞에서 검사. `gateway.recipient.local-domains`에 없는 도메인은 `gateway.recipient.relay-networks` 밖의 접속에 `554 5.7.1 Relay access denied`. 거부는 이벤트 로그에 `REJECTED/RELAY`로 남는다. 목록이 비면 정책이 꺼진 것과 같다(기존 동작).
+- **egov 설정**: `local-domains: [.handysoft.co.kr]`(egov/mars2/lucy3 등 하위 도메인, 정확히 `handysoft.co.kr`은 제외 - 이 서버가 받는 도메인이 아니고 실제 회사 MX는 다른 서버), `relay-networks: [127.0.0.0/8]`(Hedwig mynetworks와 동일, 같은 서버의 그룹웨어 앱이 localhost:25로 외부에 보내는 흐름 유지). 운영 반영 시 실제 수신 도메인 목록과 내부 앱/장비의 발송 대역을 반드시 확인할 것(빠지면 정상 메일이 554로 거절된다).
+- **한계**: 없는 사용자 검증은 Hedwig가 한다(550). 게이트웨이는 그레이리스팅을 RCPT 검증보다 먼저 하므로 없는 사용자에게도 첫 접촉은 450이 나간다.

@@ -155,7 +155,7 @@ public class AdminDashboardController {
                 "  <h3>처리 로그 <small style=\"font-weight:normal;color:#666\">(최근 200건)</small></h3>\n" +
                 "  <form id=\"evSearch\" onsubmit=\"return false\">\n" +
                 "    <select id=\"evAction\"><option value=\"ALL\">처리 전체</option><option value=\"HAM\">정상</option><option value=\"SPAM\">스팸</option><option value=\"REJECTED\">거부</option><option value=\"DEFERRED\">지연</option></select>\n" +
-                "    <select id=\"evFilter\"><option value=\"ALL\">필터 전체</option><option>RBL</option><option>BLACKLIST</option><option>WHITELIST</option><option>GREYLIST</option><option>RULE</option><option>LLM</option><option>NONE</option></select>\n" +
+                "    <select id=\"evFilter\"><option value=\"ALL\">필터 전체</option><option>RBL</option><option>RELAY</option><option>BLACKLIST</option><option>WHITELIST</option><option>GREYLIST</option><option>RULE</option><option>LLM</option><option>NONE</option></select>\n" +
                 "    <input id=\"evIp\" placeholder=\"발신 IP\" size=\"14\"> <input id=\"evSender\" placeholder=\"발신자 일부\" size=\"18\">\n" +
                 "    <button id=\"evFind\">검색</button> <button id=\"evCsv\" style=\"background:#16a34a\">엑셀(CSV) 내려받기</button>\n" +
                 "  </form>\n" +
