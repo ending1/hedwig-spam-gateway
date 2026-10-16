@@ -32,6 +32,7 @@ public class GatewayProperties {
     private final RuleFilter ruleFilter = new RuleFilter();
     private final Admin admin = new Admin();
     private final EventLog eventLog = new EventLog();
+    private final Chat chat = new Chat();
     private final SpamReportOptions spamReport = new SpamReportOptions();
 
     public int getListenPort() {
@@ -116,6 +117,33 @@ public class GatewayProperties {
 
     public EventLog getEventLog() {
         return eventLog;
+    }
+
+    public Chat getChat() {
+        return chat;
+    }
+
+    /**
+     * 관리자 챗봇. 로컬 LLM(Ollama)이 질문의 의도만 분류하고, 조회와 답변 작성은 서버의 고정된 코드가 한다.
+     * 모델은 환경변수 GATEWAY_CHAT_BASEURL / GATEWAY_CHAT_MODEL로 바꿀 수 있다.
+     */
+    public static class Chat {
+        private boolean enabled = true;
+        private String baseUrl = "";
+        private String model = "qwen3-coder:30b";
+        private int timeoutMillis = 60000;
+        private String keepAlive = "30m";
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getBaseUrl() { return baseUrl; }
+        public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
+        public String getModel() { return model; }
+        public void setModel(String model) { this.model = model; }
+        public int getTimeoutMillis() { return timeoutMillis; }
+        public void setTimeoutMillis(int timeoutMillis) { this.timeoutMillis = timeoutMillis; }
+        public String getKeepAlive() { return keepAlive; }
+        public void setKeepAlive(String keepAlive) { this.keepAlive = keepAlive; }
     }
 
     /**

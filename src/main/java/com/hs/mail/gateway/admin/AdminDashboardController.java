@@ -69,6 +69,7 @@ public class AdminDashboardController {
                 "  <button class=\"tab\" data-tab=\"rules\">룰 관리</button>\n" +
                 "  <button class=\"tab\" data-tab=\"reports\">스팸 신고<span class=\"badge\" id=\"badgeReports\"></span></button>\n" +
                 "  <button class=\"tab\" data-tab=\"events\">통계·로그</button>\n" +
+                "  <button class=\"tab\" data-tab=\"chat\">AI 챗</button>\n" +
                 "  <button class=\"tab\" data-tab=\"lists\">화이트/블랙리스트</button>\n" +
                 "</nav>\n" +
                 "<section class=\"tab-panel\" id=\"tab-lists\">\n" +
@@ -122,6 +123,16 @@ public class AdminDashboardController {
                 "    <thead><tr><th>ID</th><th>신고자</th><th>발신 도메인</th><th>제목 / 본문 일부</th><th>LLM 판정</th><th>의견</th><th>제안 룰</th><th>상태</th><th>RAG</th><th></th></tr></thead>\n" +
                 "    <tbody></tbody>\n" +
                 "  </table>\n" +
+                "</section>\n" +
+                "<section class=\"tab-panel\" id=\"tab-chat\">\n" +
+                "  <h2>AI 챗 - 스팸 서버 질의</h2>\n" +
+                "  <p style=\"font-size:0.85rem;color:#555\">통계와 룰 현황을 말로 물어보세요. 챗봇은 조회만 하며 룰이나 설정을 바꾸지 않습니다. 답변은 서버가 직접 조회한 값입니다.</p>\n" +
+                "  <div id=\"chatSamples\" style=\"margin:0.5rem 0\"></div>\n" +
+                "  <div id=\"chatLog\" style=\"background:white;border:1px solid #ddd;border-radius:8px;padding:0.8rem;min-height:200px;max-height:460px;overflow:auto\"></div>\n" +
+                "  <form id=\"chatForm\" onsubmit=\"return false\">\n" +
+                "    <input id=\"chatInput\" placeholder=\"예: 어제 스팸 몇 건이야?\" size=\"60\" maxlength=\"300\" autocomplete=\"off\">\n" +
+                "    <button id=\"chatSend\">질문</button>\n" +
+                "  </form>\n" +
                 "</section>\n" +
                 "<section class=\"tab-panel\" id=\"tab-events\">\n" +
                 "  <h2>메일 처리 통계·로그</h2>\n" +
@@ -262,6 +273,33 @@ public class AdminDashboardController {
                 "function encodeAttr(s) { return (s == null ? '' : s).replace(/'/g, \"\\\\'\"); }\n" +
                 "let ruleById = {};\n" +
                 "const TAB_STORE = 'hedwigDashTab';\n" +
+                "const CHAT_SAMPLES = ['어제 스팸 몇 건이야?', '최근 7일 스팸 상위 도메인 5개', '이번 주 일별 추이', '적중 많은 룰 알려줘', '검토 대기 신고 있어?'];\n" +
+                "function chatAdd(cls, html) {\n" +
+                "  const log = document.getElementById('chatLog'); const d = document.createElement('div');\n" +
+                "  d.style.cssText = 'margin:0.4rem 0;padding:0.5rem 0.7rem;border-radius:8px;max-width:92%;' + (cls === 'me' ? 'background:#dbeafe;margin-left:auto;width:fit-content' : 'background:#f3f4f6');\n" +
+                "  d.innerHTML = html; log.appendChild(d); log.scrollTop = log.scrollHeight; return d;\n" +
+                "}\n" +
+                "async function chatAsk(text) {\n" +
+                "  text = (text || '').trim(); if (!text) return;\n" +
+                "  document.getElementById('chatInput').value = '';\n" +
+                "  chatAdd('me', escapeHtml(text));\n" +
+                "  const wait = chatAdd('bot', '생각하는 중... (첫 질문은 모델을 불러오느라 수십 초 걸릴 수 있습니다)');\n" +
+                "  try {\n" +
+                "    const res = await adminFetch('/admin/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) });\n" +
+                "    const b = await res.json();\n" +
+                "    if (!res.ok) { wait.innerHTML = '<span style=\"color:#dc2626\">' + escapeHtml(b.error || '답변하지 못했습니다') + '</span>'; return; }\n" +
+                "    let h = escapeHtml(b.answer || '');\n" +
+                "    if (b.rows && b.rows.length) {\n" +
+                "      h += '<table style=\"margin-top:0.4rem;width:auto\"><thead><tr>' + b.columns.map(c => '<th>' + escapeHtml(c) + '</th>').join('') + '</tr></thead><tbody>' +\n" +
+                "        b.rows.map(r => '<tr>' + r.map(v => '<td>' + escapeHtml(String(v)) + '</td>').join('') + '</tr>').join('') + '</tbody></table>';\n" +
+                "    }\n" +
+                "    wait.innerHTML = h;\n" +
+                "  } catch (e) { wait.innerHTML = '<span style=\"color:#dc2626\">요청에 실패했습니다</span>'; }\n" +
+                "}\n" +
+                "document.getElementById('chatSamples').innerHTML = CHAT_SAMPLES.map(s => '<button type=\"button\" class=\"chip\" style=\"background:#e5e7eb;color:#111;margin:0 0.3rem 0.3rem 0\">' + escapeHtml(s) + '</button>').join('');\n" +
+                "document.getElementById('chatSamples').addEventListener('click', (e) => { const b = e.target.closest('.chip'); if (b) chatAsk(b.textContent); });\n" +
+                "document.getElementById('chatSend').addEventListener('click', () => chatAsk(document.getElementById('chatInput').value));\n" +
+                "document.getElementById('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); chatAsk(e.target.value); } });\n" +
                 "const EV_LABEL = { HAM: '정상', SPAM: '스팸', REJECTED: '거부', DEFERRED: '지연' };\n" +
                 "function evRange() {\n" +
                 "  const per = document.getElementById('evPeriod').value;\n" +
