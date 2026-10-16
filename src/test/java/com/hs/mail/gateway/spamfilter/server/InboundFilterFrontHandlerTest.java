@@ -61,6 +61,7 @@ class InboundFilterFrontHandlerTest {
     private int gatewayPort;
     private com.hs.mail.gateway.auth.AuthChecker authChecker;
     private com.hs.mail.gateway.spamfilter.RecipientPolicy recipientPolicy;
+    private com.hs.mail.gateway.quarantine.QuarantineService quarantine;
     /** 룰기반 필터 사용 여부(기본 꺼짐: 기존 시나리오는 룰 없이 LLM 분류만 검증한다). */
     private boolean enableRules;
 
@@ -107,7 +108,7 @@ class InboundFilterFrontHandlerTest {
                                 .addLast(new InboundFilterFrontHandler(properties, classifier, spamStats,
                                         connectionStats, classifierExecutor, greylistService,
                                         mailListService, new RuleBasedSpamChecker(properties, com.hs.mail.gateway.spamfilter.SpamRuleService.defaults()))
-                                        .withAuthChecker(authChecker).withRecipientPolicy(recipientPolicy));
+                                        .withAuthChecker(authChecker).withRecipientPolicy(recipientPolicy).withQuarantine(quarantine));
                     }
                 });
         serverChannel = bootstrap.bind(0).sync().channel();
@@ -435,6 +436,36 @@ class InboundFilterFrontHandlerTest {
         List<String> out = InboundFilterFrontHandler.stripSpamHeaders(in);
         assertEquals(java.util.Arrays.asList("Received: from x", "X-Spam-Level: ***", "Subject: hi", "", "X-Spam-Flag: YES", "body"), out);
         assertEquals(9, in.size(), "입력 목록은 바꾸지 않는다");
+    }
+
+    @Test
+    void 스팸_판정_메일은_격리함에_사본이_보관되고_메일은_평소처럼_전달된다() throws Exception {
+        quarantine = org.mockito.Mockito.mock(com.hs.mail.gateway.quarantine.QuarantineService.class);
+        org.mockito.Mockito.when(quarantine.isEnabled()).thenReturn(true);
+        start(fixedVerdictClassifier(true));
+        runTransaction();
+        fakeBackend.awaitDataCaptured(5, TimeUnit.SECONDS);
+
+        org.mockito.Mockito.verify(quarantine).store(org.mockito.ArgumentMatchers.eq("127.0.0.1"),
+                org.mockito.ArgumentMatchers.eq("sender@example.com"),
+                org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.eq("hello"),
+                org.mockito.ArgumentMatchers.anyDouble(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyString(),
+                org.mockito.ArgumentMatchers.anyList());
+        assertTrue(fakeBackend.getCapturedDataLines().get(0).startsWith("X-Spam-Flag: YES"), "전달은 평소처럼 스팸 태그");
+    }
+
+    @Test
+    void 정상_메일은_격리함에_보관하지_않는다() throws Exception {
+        quarantine = org.mockito.Mockito.mock(com.hs.mail.gateway.quarantine.QuarantineService.class);
+        org.mockito.Mockito.when(quarantine.isEnabled()).thenReturn(true);
+        start(fixedVerdictClassifier(false));
+        runTransaction();
+        fakeBackend.awaitDataCaptured(5, TimeUnit.SECONDS);
+        org.mockito.Mockito.verify(quarantine, org.mockito.Mockito.never()).store(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyDouble(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyList());
     }
 
     private RecipientPolicy policy(String relayNetwork) {

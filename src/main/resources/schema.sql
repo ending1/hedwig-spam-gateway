@@ -99,3 +99,21 @@ CREATE TABLE IF NOT EXISTS hw_admin_audit (
     before_val VARCHAR(500),
     after_val VARCHAR(500)
 );
+
+CREATE TABLE IF NOT EXISTS hw_quarantine (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    received_at TIMESTAMP NOT NULL,
+    received_day VARCHAR(10) NOT NULL,
+    client_ip VARCHAR(45),
+    mail_from VARCHAR(255),
+    rcpt_list VARCHAR(500),
+    subject VARCHAR(300),
+    score DOUBLE DEFAULT 0,
+    filter_name VARCHAR(12),
+    reason VARCHAR(500),
+    auth_summary VARCHAR(40),
+    status VARCHAR(12) NOT NULL,
+    size_bytes BIGINT DEFAULT 0,
+    eml_file VARCHAR(100)
+);
+CREATE INDEX IF NOT EXISTS idx_hw_quarantine_day ON hw_quarantine (received_day);

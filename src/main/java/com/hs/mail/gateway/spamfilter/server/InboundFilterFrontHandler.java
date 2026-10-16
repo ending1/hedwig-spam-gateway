@@ -64,6 +64,14 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
     private MailEventService mailEvents;
     /** 수신 메일 인증(SPF/DKIM/DMARC) 검증기(선택). 없거나 꺼져 있으면 검증하지 않는다. */
     private com.hs.mail.gateway.auth.AuthChecker authChecker;
+    /** 격리함(선택). 스팸 판정 메일의 사본을 관리자 검토용으로 보관한다. */
+    private com.hs.mail.gateway.quarantine.QuarantineService quarantineService;
+
+    public InboundFilterFrontHandler withQuarantine(com.hs.mail.gateway.quarantine.QuarantineService quarantineService) {
+        this.quarantineService = quarantineService;
+        return this;
+    }
+
     /** 수신자 도메인 정책(릴레이 차단, 선택). */
     private com.hs.mail.gateway.spamfilter.RecipientPolicy recipientPolicy;
 
@@ -435,10 +443,21 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
     }
 
     private void deliverBufferedData(ChannelHandlerContext ctx, SpamVerdict verdict, List<String> bufferedLines) {
-        if (mailEvents != null && mailEvents.isEnabled()) {
+        boolean quarantine = verdict.isSpam() && quarantineService != null && quarantineService.isEnabled();
+        if ((mailEvents != null && mailEvents.isEnabled()) || quarantine) {
             String subject = SpamCheckRequest.from(session.mailFrom, session.recipients, bufferedLines, 1).getSubject();
             recordEvent(verdict.isSpam() ? MailEvent.SPAM : MailEvent.HAM, filterOf(verdict), clientIp(ctx),
                     session.mailFrom, session.recipients, subject, verdict.getScore(), verdict.getReason());
+            if (quarantine) {
+                // 사본을 격리함에 보관한다(메일은 아래에서 평소처럼 스팸 태그를 붙여 전달된다).
+                try {
+                    quarantineService.store(clientIp(ctx), session.mailFrom, new java.util.ArrayList<>(session.recipients),
+                            subject, verdict.getScore(), filterOf(verdict), verdict.getReason(),
+                            session.authResult == null ? "" : session.authResult.summary(), bufferedLines);
+                } catch (RuntimeException e) {
+                    log.warn("격리함 보관 요청 실패(무시): {}", e.getMessage());
+                }
+            }
         }
         if (session.authResult != null) {
             backendChannel.write("Authentication-Results: " + session.authResult.headerValue(properties.getInstanceId()) + "\r\n");

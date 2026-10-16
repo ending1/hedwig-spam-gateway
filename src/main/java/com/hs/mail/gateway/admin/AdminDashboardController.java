@@ -69,6 +69,7 @@ public class AdminDashboardController {
                 "  <button class=\"tab\" data-tab=\"rules\">룰 관리</button>\n" +
                 "  <button class=\"tab\" data-tab=\"reports\">스팸 신고<span class=\"badge\" id=\"badgeReports\"></span></button>\n" +
                 "  <button class=\"tab\" data-tab=\"events\">통계·로그</button>\n" +
+                "  <button class=\"tab\" data-tab=\"quarantine\">격리함<span class=\"badge\" id=\"badgeQuarantine\"></span></button>\n" +
                 "  <button class=\"tab\" data-tab=\"chat\">AI 챗</button>\n" +
                 "  <button class=\"tab\" data-tab=\"lists\">화이트/블랙리스트</button>\n" +
                 "</nav>\n" +
@@ -123,6 +124,17 @@ public class AdminDashboardController {
                 "    <thead><tr><th>ID</th><th>신고자</th><th>발신 도메인</th><th>제목 / 본문 일부</th><th>LLM 판정</th><th>의견</th><th>제안 룰</th><th>상태</th><th>RAG</th><th></th></tr></thead>\n" +
                 "    <tbody></tbody>\n" +
                 "  </table>\n" +
+                "</section>\n" +
+                "<section class=\"tab-panel\" id=\"tab-quarantine\">\n" +
+                "  <h2>격리함 (스팸 판정 메일 보관)</h2>\n" +
+                "  <p style=\"font-size:0.85rem;color:#555\">스팸으로 판정된 메일은 평소처럼 스팸 태그가 붙어 전달되고, 관리자 검토용 사본이 여기 보관됩니다. <b>복구</b>는 스팸 태그 없이 수신자에게 한 통 더 전달합니다. 보관 기간이 지나면 자동 삭제됩니다. 원문은 외부 메일이므로 첨부파일(EML)로만 받을 수 있습니다.</p>\n" +
+                "  <form id=\"qForm\" onsubmit=\"return false\">\n" +
+                "    <select id=\"qStatus\"><option value=\"ALL\">상태 전체</option><option value=\"QUARANTINED\">격리 중</option><option value=\"RELEASED\">복구됨</option></select>\n" +
+                "    <select id=\"qPeriod\"><option value=\"today\">오늘</option><option value=\"last7d\">최근 7일</option><option value=\"last30d\" selected>최근 30일</option></select>\n" +
+                "    <input id=\"qSender\" placeholder=\"발신자 일부\" size=\"22\"> <button id=\"qFind\">조회</button> <span id=\"qCounts\" style=\"color:#555\"></span>\n" +
+                "  </form>\n" +
+                "  <table id=\"qTable\"><thead><tr><th>ID</th><th>시각</th><th>발신자</th><th>수신자</th><th>제목</th><th>점수</th><th>판정 근거</th><th>상태</th><th></th></tr></thead><tbody></tbody></table>\n" +
+                "  <div id=\"qPreviewWrap\" style=\"display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;align-items:center;justify-content:center\"><div id=\"qPreviewBox\" style=\"background:white;padding:1.2rem;border-radius:10px;max-width:760px;width:92%;max-height:84vh;overflow:auto\"></div></div>\n" +
                 "</section>\n" +
                 "<section class=\"tab-panel\" id=\"tab-chat\">\n" +
                 "  <h2>AI 챗 - 스팸 서버 질의</h2>\n" +
@@ -277,7 +289,44 @@ public class AdminDashboardController {
                 "function encodeAttr(s) { return (s == null ? '' : s).replace(/'/g, \"\\\\'\"); }\n" +
                 "let ruleById = {};\n" +
                 "const TAB_STORE = 'hedwigDashTab';\n" +
-                "const CHAT_SAMPLES = ['어제 스팸 몇 건이야?', '최근 7일 스팸 상위 도메인 5개', '이번 주 일별 추이', '적중 많은 룰 알려줘', '검토 대기 신고 있어?'];\n" +
+                "const Q_STATUS = { QUARANTINED: '격리 중', RELEASED: '복구됨' };\n" +
+                "async function loadQuarantine() {\n" +
+                "  const q = '?period=' + document.getElementById('qPeriod').value + '&status=' + document.getElementById('qStatus').value +\n" +
+                "    (document.getElementById('qSender').value.trim() ? '&sender=' + encodeURIComponent(document.getElementById('qSender').value.trim()) : '');\n" +
+                "  const res = await adminFetch('/admin/quarantine' + q); if (!res.ok) return;\n" +
+                "  const d = await res.json(); const c = d.counts || {};\n" +
+                "  document.getElementById('qCounts').textContent = d.enabled ? '전체 보관: 격리 중 ' + (c.QUARANTINED || 0) + '건, 복구됨 ' + (c.RELEASED || 0) + '건' : '격리함이 꺼져 있습니다(gateway.quarantine.enabled)';\n" +
+                "  document.getElementById('badgeQuarantine').textContent = (c.QUARANTINED || 0) ? ' (' + c.QUARANTINED + ')' : '';\n" +
+                "  window.qById = {}; d.rows.forEach(r => { window.qById[r.id] = r; });\n" +
+                "  document.querySelector('#qTable tbody').innerHTML = d.rows.map(r => '<tr><td>' + r.id + '</td><td>' + r.at + '</td><td>' + escapeHtml(r.from) + '</td><td>' + escapeHtml(r.rcpt) + '</td><td>' + escapeHtml(r.subject) + '</td><td>' + r.score + '</td><td>' + escapeHtml(r.filter) + ': ' + escapeHtml(r.reason || '') + '</td><td>' + (Q_STATUS[r.status] || r.status) + '</td><td>' +\n" +
+                "    (r.hasEml ? '<button data-q=\"view\" data-id=\"' + r.id + '\">보기</button> <button data-q=\"release\" data-id=\"' + r.id + '\">복구</button> <button data-q=\"releasewl\" data-id=\"' + r.id + '\">복구+허용</button> <button data-q=\"eml\" data-id=\"' + r.id + '\" style=\"background:#6b7280\">원문</button> ' : '<span style=\"color:#888\">원문 없음</span> ') +\n" +
+                "    '<button class=\"danger\" data-q=\"del\" data-id=\"' + r.id + '\">삭제</button></td></tr>').join('') || '<tr><td colspan=\"9\">보관된 메일이 없습니다</td></tr>';\n" +
+                "}\n" +
+                "document.querySelector('#qTable tbody').addEventListener('click', async (e) => {\n" +
+                "  const b = e.target.closest('button[data-q]'); if (!b) return;\n" +
+                "  const id = b.dataset.id, act = b.dataset.q, r = window.qById[id];\n" +
+                "  if (act === 'view') {\n" +
+                "    const res = await adminFetch('/admin/quarantine/' + id + '/preview'); const p = await res.json();\n" +
+                "    const box = document.getElementById('qPreviewBox'); const wrap = document.getElementById('qPreviewWrap');\n" +
+                "    box.innerHTML = res.ok ? '<h3 style=\"margin-top:0\">' + escapeHtml(p.subject || '(제목 없음)') + '</h3><div style=\"font-size:0.85rem;color:#555\">보낸이: ' + escapeHtml(p.from || '') + '<br>받는이: ' + escapeHtml(p.to || '') + '<br>날짜: ' + escapeHtml(p.date || '') + '</div><pre style=\"white-space:pre-wrap;background:#f9fafb;padding:0.6rem;border-radius:6px;margin-top:0.6rem\">' + escapeHtml(p.text || '') + '</pre>' + ((p.attachments || []).length ? '<div>첨부: ' + p.attachments.map(escapeHtml).join(', ') + '</div>' : '') + '<p style=\"color:#b45309;font-size:0.85rem\">스팸 의심 메일입니다. 본문 안의 링크를 열지 마세요.</p><button id=\"qClose\">닫기</button>' : '<span style=\"color:#dc2626\">' + escapeHtml(p.error || '열람하지 못했습니다') + '</span> <button id=\"qClose\">닫기</button>';\n" +
+                "    wrap.style.display = 'flex'; wrap.onclick = (ev) => { if (ev.target === wrap) wrap.style.display = 'none'; };\n" +
+                "    document.getElementById('qClose').onclick = () => { wrap.style.display = 'none'; };\n" +
+                "  } else if (act === 'eml') {\n" +
+                "    const res = await adminFetch('/admin/quarantine/' + id + '/eml'); if (!res.ok) { alert('내려받지 못했습니다'); return; }\n" +
+                "    const blob = await res.blob(); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'quarantine-' + id + '.eml'; document.body.appendChild(a); a.click(); a.remove();\n" +
+                "  } else if (act === 'release' || act === 'releasewl') {\n" +
+                "    if (!confirm('발신자 ' + r.from + '의 메일(\"' + (r.subject || '') + '\")을 스팸 태그 없이 수신자에게 다시 전달합니다.' + (act === 'releasewl' ? '\\n발신자도 화이트리스트에 추가됩니다.' : '') + '\\n진행할까요?')) return;\n" +
+                "    const res = await adminFetch('/admin/quarantine/' + id + '/release', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ whitelist: act === 'releasewl' }) });\n" +
+                "    const body = await res.json(); alert(res.ok ? body.message : '복구하지 못했습니다: ' + body.error); loadQuarantine();\n" +
+                "  } else if (act === 'del') {\n" +
+                "    if (!confirm('이 메일을 격리함에서 삭제합니다(원문 파일도 지워지며 되돌릴 수 없습니다). 진행할까요?')) return;\n" +
+                "    await adminFetch('/admin/quarantine/' + id, { method: 'DELETE' }); loadQuarantine();\n" +
+                "  }\n" +
+                "});\n" +
+                "document.getElementById('qFind').addEventListener('click', loadQuarantine);\n" +
+                "document.getElementById('qStatus').addEventListener('change', loadQuarantine);\n" +
+                "document.getElementById('qPeriod').addEventListener('change', loadQuarantine);\n" +
+                "const CHAT_SAMPLES =['어제 스팸 몇 건이야?', '최근 7일 스팸 상위 도메인 5개', '이번 주 일별 추이', '적중 많은 룰 알려줘', '검토 대기 신고 있어?'];\n" +
                 "function chatAdd(cls, html) {\n" +
                 "  const log = document.getElementById('chatLog'); const d = document.createElement('div');\n" +
                 "  d.style.cssText = 'margin:0.4rem 0;padding:0.5rem 0.7rem;border-radius:8px;max-width:92%;' + (cls === 'me' ? 'background:#dbeafe;margin-left:auto;width:fit-content' : 'background:#f3f4f6');\n" +
@@ -393,6 +442,7 @@ public class AdminDashboardController {
                 "document.getElementById('tabs').addEventListener('click', (e) => {\n" +
                 "  const b = e.target.closest('.tab'); if (b && b.dataset.tab === 'events') loadEventStats();\n" +
                 "  if (b && b.dataset.tab === 'chat') loadAudit();\n" +
+                "  if (b && b.dataset.tab === 'quarantine') loadQuarantine();\n" +
                 "});\n" +
                 "function showTab(name) {\n" +
                 "  if (!document.getElementById('tab-' + name)) name = 'rules';\n" +
@@ -562,7 +612,7 @@ public class AdminDashboardController {
                 "let savedTab = 'rules'; try { savedTab = sessionStorage.getItem(TAB_STORE) || 'rules'; } catch (e) {}\n" +
                 "showTab(savedTab);\n" +
                 "loadStats();\n" +
-                "initAuth().then((ok) => { if (ok) { loadList(); loadRules(); loadReports(); if (savedTab === 'events') loadEventStats(); } });\n" +
+                "initAuth().then((ok) => { if (ok) { loadList(); loadRules(); loadReports(); if (savedTab === 'events') loadEventStats(); loadQuarantine(); } });\n" +
                 "setInterval(loadStats, 5000);\n" +
                 "</script>\n" +
                 "</body>\n" +

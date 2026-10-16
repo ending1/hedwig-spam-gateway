@@ -54,6 +54,12 @@ public class GatewayChannelInitializer extends ChannelInitializer<SocketChannel>
     private com.hs.mail.gateway.event.MailEventService mailEvents;
     private com.hs.mail.gateway.auth.AuthChecker authChecker;
     private com.hs.mail.gateway.spamfilter.RecipientPolicy recipientPolicy;
+    private com.hs.mail.gateway.quarantine.QuarantineService quarantineService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setQuarantineService(com.hs.mail.gateway.quarantine.QuarantineService quarantineService) {
+        this.quarantineService = quarantineService;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setRecipientPolicy(com.hs.mail.gateway.spamfilter.RecipientPolicy recipientPolicy) {
@@ -117,7 +123,7 @@ public class GatewayChannelInitializer extends ChannelInitializer<SocketChannel>
                     .addLast("stringEncoder", new StringEncoder())
                     .addLast("spamFilterProxy", new InboundFilterFrontHandler(properties, spamClassifier,
                             spamFilterStats, connectionStats, spamClassifierExecutor.get(), greylistService,
-                            mailListService, ruleBasedSpamChecker).withMailEvents(mailEvents).withAuthChecker(authChecker).withRecipientPolicy(recipientPolicy));
+                            mailListService, ruleBasedSpamChecker).withMailEvents(mailEvents).withAuthChecker(authChecker).withRecipientPolicy(recipientPolicy).withQuarantine(quarantineService));
         } else {
             ch.pipeline().addLast("relay", new RelayHandler(properties, connectionStats));
         }

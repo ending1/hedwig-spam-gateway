@@ -35,6 +35,7 @@ public class GatewayProperties {
     private final Chat chat = new Chat();
     private final Auth auth = new Auth();
     private final Recipient recipient = new Recipient();
+    private final Quarantine quarantine = new Quarantine();
     private final SpamReportOptions spamReport = new SpamReportOptions();
 
     public int getListenPort() {
@@ -131,6 +132,32 @@ public class GatewayProperties {
 
     public Recipient getRecipient() {
         return recipient;
+    }
+
+    public Quarantine getQuarantine() {
+        return quarantine;
+    }
+
+    /**
+     * 격리함(관리자 검토용 스팸 보관). 스팸으로 판정된 메일의 원문을 파일로 보관하고 목록/열람/복구(재전달)/삭제를 제공한다.
+     * 메일 전달 자체는 바꾸지 않는다(스팸 태그를 붙여 Hedwig로 평소처럼 전달하고, 보관은 사본). 보관 기간은 환경변수
+     * {@code GATEWAY_QUARANTINE_RETENTIONDAYS}(또는 gateway.quarantine.retention-days)로 지정하며 0이면 삭제하지 않는다.
+     */
+    public static class Quarantine {
+        private boolean enabled = false;
+        private String dir = "quarantine";
+        private int retentionDays = 14;
+        /** 이보다 큰 메일은 보관하지 않는다(메타데이터만 남김). */
+        private int maxMessageBytes = 5 * 1024 * 1024;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public String getDir() { return dir; }
+        public void setDir(String dir) { this.dir = dir; }
+        public int getRetentionDays() { return retentionDays; }
+        public void setRetentionDays(int retentionDays) { this.retentionDays = retentionDays; }
+        public int getMaxMessageBytes() { return maxMessageBytes; }
+        public void setMaxMessageBytes(int maxMessageBytes) { this.maxMessageBytes = maxMessageBytes; }
     }
 
     /**
