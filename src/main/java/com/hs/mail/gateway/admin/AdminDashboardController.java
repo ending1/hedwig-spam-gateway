@@ -144,6 +144,8 @@ public class AdminDashboardController {
                 "    <button id=\"evReload\">조회</button>\n" +
                 "  </form>\n" +
                 "  <div class=\"cards\" id=\"evCards\"></div>\n" +
+                "  <h3>발신 인증 결과 (SPF · DKIM · DMARC)</h3>\n" +
+                "  <table id=\"evAuth\"><thead><tr><th>결과</th><th>SPF</th><th>DKIM</th><th>DMARC</th></tr></thead><tbody></tbody></table>\n" +
                 "  <h3>일자별 추이</h3>\n" +
                 "  <table id=\"evDaily\"><thead><tr><th>일자</th><th>정상</th><th>스팸</th><th>거부</th><th>지연</th><th>스팸 비율</th></tr></thead><tbody></tbody></table>\n" +
                 "  <h3>항목별 상위\n" +
@@ -157,7 +159,7 @@ public class AdminDashboardController {
                 "    <input id=\"evIp\" placeholder=\"발신 IP\" size=\"14\"> <input id=\"evSender\" placeholder=\"발신자 일부\" size=\"18\">\n" +
                 "    <button id=\"evFind\">검색</button> <button id=\"evCsv\" style=\"background:#16a34a\">엑셀(CSV) 내려받기</button>\n" +
                 "  </form>\n" +
-                "  <table id=\"evLog\"><thead><tr><th>시각</th><th>처리</th><th>필터</th><th>IP</th><th>발신자</th><th>수신 도메인</th><th>제목</th><th>점수</th><th>사유</th></tr></thead><tbody></tbody></table>\n" +
+                "  <table id=\"evLog\"><thead><tr><th>시각</th><th>처리</th><th>필터</th><th>IP</th><th>발신자</th><th>수신 도메인</th><th>제목</th><th>점수</th><th>사유</th><th>인증</th></tr></thead><tbody></tbody></table>\n" +
                 "</section>\n" +
                 "<script>\n" +
                 "const KEY_STORE = 'hedwigAdminKey';\n" +
@@ -350,6 +352,13 @@ public class AdminDashboardController {
                 "      return '<tr><td>' + x.day + '</td><td>' + x.HAM + '</td><td>' + x.SPAM + '</td><td>' + x.REJECTED + '</td><td>' + x.DEFERRED + '</td><td><div style=\"background:#e5e7eb;border-radius:4px;width:160px\"><div style=\"background:#dc2626;height:10px;border-radius:4px;width:' + (pct * 1.6) + 'px\"></div></div> ' + pct + '%</td></tr>';\n" +
                 "    }).join('') || '<tr><td colspan=\"6\">데이터 없음</td></tr>';\n" +
                 "  }\n" +
+                "  const ar = await adminFetch('/admin/stats/auth?' + r);\n" +
+                "  if (ar.ok) {\n" +
+                "    const a = await ar.json(); const get = (m, k) => (a[m] && a[m][k]) || 0;\n" +
+                "    document.querySelector('#evAuth tbody').innerHTML = ['pass', 'fail', 'softfail', 'neutral', 'none', 'temperror', 'permerror']\n" +
+                "      .filter(k => get('spf', k) + get('dkim', k) + get('dmarc', k) > 0)\n" +
+                "      .map(k => '<tr><td>' + k + '</td><td>' + get('spf', k) + '</td><td>' + get('dkim', k) + '</td><td>' + get('dmarc', k) + '</td></tr>').join('') || '<tr><td colspan=\"4\">인증 결과가 기록된 메일이 없습니다</td></tr>';\n" +
+                "  }\n" +
                 "  loadEventTop(); loadEventLog();\n" +
                 "}\n" +
                 "async function loadEventTop() {\n" +
@@ -368,7 +377,7 @@ public class AdminDashboardController {
                 "  const res = await adminFetch('/admin/events?' + evLogQuery() + '&limit=200');\n" +
                 "  if (!res.ok) return;\n" +
                 "  const rows = await res.json();\n" +
-                "  document.querySelector('#evLog tbody').innerHTML = rows.map(x => '<tr><td>' + x.at + '</td><td>' + (EV_LABEL[x.action] || x.action) + '</td><td>' + x.filter + '</td><td>' + escapeHtml(x.ip) + '</td><td>' + escapeHtml(x.from) + '</td><td>' + escapeHtml(x.rcptDomain) + '</td><td>' + escapeHtml(x.subject) + '</td><td>' + x.score + '</td><td>' + escapeHtml(x.reason) + '</td></tr>').join('') || '<tr><td colspan=\"9\">데이터 없음</td></tr>';\n" +
+                "  document.querySelector('#evLog tbody').innerHTML = rows.map(x => '<tr><td>' + x.at + '</td><td>' + (EV_LABEL[x.action] || x.action) + '</td><td>' + x.filter + '</td><td>' + escapeHtml(x.ip) + '</td><td>' + escapeHtml(x.from) + '</td><td>' + escapeHtml(x.rcptDomain) + '</td><td>' + escapeHtml(x.subject) + '</td><td>' + x.score + '</td><td>' + escapeHtml(x.reason) + '</td><td>' + escapeHtml(x.auth || '') + '</td></tr>').join('') || '<tr><td colspan=\"10\">데이터 없음</td></tr>';\n" +
                 "}\n" +
                 "document.getElementById('evReload').addEventListener('click', loadEventStats);\n" +
                 "document.getElementById('evPeriod').addEventListener('change', loadEventStats);\n" +

@@ -150,6 +150,41 @@ public class RuleBasedSpamChecker {
             addHit(hits, findBrandId(brandMismatch));
         }
 
+        // 발신 인증 결과(SPF/DKIM/DMARC). DMARC 실패는 도메인 소유자가 정한 정책 강도에 따라 가중치를 달리한다.
+        com.hs.mail.gateway.auth.AuthResult auth = request.getAuth();
+        if (auth != null) {
+            String dmarcKey = null;
+            double dmarcDefault = 0;
+            if ("fail".equals(auth.dmarc)) {
+                if ("reject".equals(auth.dmarcPolicy)) {
+                    dmarcKey = "auth-dmarc-fail-reject";
+                    dmarcDefault = 5.0;
+                } else if ("quarantine".equals(auth.dmarcPolicy)) {
+                    dmarcKey = "auth-dmarc-fail-quarantine";
+                    dmarcDefault = 3.0;
+                } else {
+                    dmarcKey = "auth-dmarc-fail-none";
+                    dmarcDefault = 1.0;
+                }
+            }
+            if (dmarcKey != null && ruleService.isStructuralEnabled(dmarcKey)) {
+                score += ruleService.getStructuralWeight(dmarcKey, dmarcDefault);
+                reasons.add(dmarcKey + ":" + auth.fromDomain);
+                addHit(hits, ruleService.getStructuralId(dmarcKey));
+            }
+            String spfKey = "fail".equals(auth.spf) ? "auth-spf-fail" : "softfail".equals(auth.spf) ? "auth-spf-softfail" : null;
+            if (spfKey != null && ruleService.isStructuralEnabled(spfKey)) {
+                score += ruleService.getStructuralWeight(spfKey, "auth-spf-fail".equals(spfKey) ? 2.0 : 1.0);
+                reasons.add(spfKey);
+                addHit(hits, ruleService.getStructuralId(spfKey));
+            }
+            if ("fail".equals(auth.dkim) && ruleService.isStructuralEnabled("auth-dkim-fail")) {
+                score += ruleService.getStructuralWeight("auth-dkim-fail", 1.5);
+                reasons.add("auth-dkim-fail");
+                addHit(hits, ruleService.getStructuralId("auth-dkim-fail"));
+            }
+        }
+
         if (ruleService.isStructuralEnabled("missing-date-header") && !DATE_HEADER_PATTERN.matcher(headers).find()) {
             score += ruleService.getStructuralWeight("missing-date-header", 1.0);
             reasons.add("missing-date-header");

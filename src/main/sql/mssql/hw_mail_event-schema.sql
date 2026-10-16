@@ -12,6 +12,9 @@ CREATE TABLE hw_mail_event (
   rcpt_count   INT DEFAULT 0,
   subject      NVARCHAR(200),
   score        FLOAT DEFAULT 0,
-  reason       NVARCHAR(500)
+  reason       NVARCHAR(500),
+  spf_result   VARCHAR(10),
+  dkim_result  VARCHAR(10),
+  dmarc_result VARCHAR(10)
 );
 CREATE INDEX idx_hw_mail_event_day ON hw_mail_event (event_day, action);

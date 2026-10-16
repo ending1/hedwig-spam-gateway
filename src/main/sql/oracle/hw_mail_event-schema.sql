@@ -14,6 +14,9 @@ CREATE TABLE hw_mail_event (
   subject      varchar2(200 CHAR),
   score        NUMBER(7,3) DEFAULT 0,
   reason       varchar2(500 CHAR),
+  spf_result   varchar2(10),
+  dkim_result  varchar2(10),
+  dmarc_result varchar2(10),
   CONSTRAINT pk_hw_mail_event PRIMARY KEY (id)
 );
 

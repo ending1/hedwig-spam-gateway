@@ -18,6 +18,10 @@ class ProxySession {
     boolean whitelisted;
     /** 블랙리스트 매치(태그 모드) - 스팸 판정 없이 무조건 스팸 헤더를 강제 주입. */
     boolean forceSpamTag;
+    /** EHLO/HELO로 받은 이름(연결 동안 유지). SPF의 HELO 검사와 반송 메일(MAIL FROM:<>)에 쓴다. */
+    String helo = "";
+    /** 이번 메일의 SPF/DKIM/DMARC 결과(검증하지 않았으면 null). */
+    com.hs.mail.gateway.auth.AuthResult authResult;
 
     void resetTransaction() {
         dataPending = false;
@@ -27,5 +31,6 @@ class ProxySession {
         recipients = new ArrayList<>();
         whitelisted = false;
         forceSpamTag = false;
+        authResult = null;
     }
 }

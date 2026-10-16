@@ -39,8 +39,39 @@ public class SpamRuleService {
     @Autowired
     public SpamRuleService(SpamRuleDao dao) {
         this.dao = dao;
-        seedIfEmpty();
+        boolean seeded = seedIfEmpty();
+        if (!seeded) {
+            ensureAuthRows();
+        }
         refresh();
+    }
+
+    /**
+     * 발신 인증(SPF/DKIM/DMARC) 도입 전부터 쓰던 DB에는 auth-* 구조 룰 행이 없다. 관리자가 대시보드에서 가중치를
+     * 조정할 수 있도록 없는 행만 기본값으로 채운다(이미 있는 행과 다른 룰은 건드리지 않는다).
+     */
+    private void ensureAuthRows() {
+        try {
+            java.util.Set<String> have = new java.util.HashSet<>();
+            for (SpamRuleEntry e : dao.findAll()) {
+                if (e.getRuleType() == SpamRuleEntry.RuleType.STRUCTURAL) {
+                    have.add(e.getPattern());
+                }
+            }
+            int added = 0;
+            for (SpamRuleEntry seed : seedEntries()) {
+                if (seed.getRuleType() == SpamRuleEntry.RuleType.STRUCTURAL && seed.getPattern().startsWith("auth-")
+                        && !have.contains(seed.getPattern())) {
+                    dao.insert(seed);
+                    added++;
+                }
+            }
+            if (added > 0) {
+                log.info("발신 인증 구조 룰 {}건을 추가했다(auth-*)", added);
+            }
+        } catch (Exception e) {
+            log.warn("발신 인증 구조 룰 추가 실패, 계속 진행한다: {}", e.getMessage());
+        }
     }
 
     /**
@@ -48,18 +79,20 @@ public class SpamRuleService {
      * 룰이 재기동으로 되살아나면 안 되므로 "처음 한 번"만 시드하고, 이후에는 DB 내용을 그대로 신뢰한다.
      * 실패해도 기동은 계속한다(코드 내장 기본값으로도 필터는 동작).
      */
-    private void seedIfEmpty() {
+    private boolean seedIfEmpty() {
         try {
             if (!dao.findAll().isEmpty()) {
-                return;
+                return false;
             }
             List<SpamRuleEntry> seeds = seedEntries();
             for (SpamRuleEntry seed : seeds) {
                 dao.insert(seed);
             }
             log.info("스팸 룰 테이블이 비어 있어 기본 룰셋 {}건을 시드했다", seeds.size());
+            return true;
         } catch (Exception e) {
             log.warn("스팸 룰 기본값 시드 실패, 계속 진행한다: {}", e.getMessage());
+            return false;
         }
     }
 
@@ -77,6 +110,12 @@ public class SpamRuleService {
                 {"subject-excessive-exclamation", 1.5, "느낌표 3개 이상"},
                 {"empty-body", 1.0, "제목은 있는데 본문이 빔"},
                 {"internal-domain-spoof", 5.0, "자사 도메인 사칭(외부 IP 발신) - internal-domains 설정 시에만 동작"},
+                {"auth-dmarc-fail-reject", 5.0, "DMARC 실패 + 도메인 정책 reject (SPF/DKIM 둘 다 From과 정렬되지 않음)"},
+                {"auth-dmarc-fail-quarantine", 3.0, "DMARC 실패 + 도메인 정책 quarantine"},
+                {"auth-dmarc-fail-none", 1.0, "DMARC 실패 + 도메인 정책 none(모니터링 단계)"},
+                {"auth-spf-fail", 2.0, "SPF 실패(-all 등으로 허용되지 않은 IP)"},
+                {"auth-spf-softfail", 1.0, "SPF softfail(~all)"},
+                {"auth-dkim-fail", 1.5, "DKIM 서명이 있는데 검증 실패(본문/헤더 변조 또는 키 불일치)"},
         };
         for (Object[] row : structural) {
             entries.add(new SpamRuleEntry(null, SpamRuleEntry.RuleType.STRUCTURAL, (String) row[0],

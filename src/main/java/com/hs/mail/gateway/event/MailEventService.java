@@ -124,6 +124,12 @@ public class MailEventService {
         return dao.search(fromDay, toDay, action, filter, ip, senderLike, limit);
     }
 
+    /** 인증 방식(spf|dkim|dmarc)별 결과 건수. */
+    public Map<String, Long> authSummary(String mechanism, String fromDay, String toDay) {
+        flush();
+        return dao.authSummary(mechanism, fromDay, toDay);
+    }
+
     public long droppedCount() {
         return dropped.get();
     }

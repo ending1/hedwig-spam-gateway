@@ -89,6 +89,7 @@ public class ChatService {
                 + "- STATS_SUMMARY: 기간별 처리 요약(정상/스팸/거부/지연 건수). params: period\n"
                 + "- STATS_TOP: 항목별 상위 N. params: dimension(domain|ip|sender|filter|recipient_domain), period, limit(기본 5), action(SPAM|REJECTED|DEFERRED|HAM|ALL, 기본 SPAM. dimension이 filter면 ALL)\n"
                 + "- STATS_TREND: 일자별 추이. params: period\n"
+                + "- STATS_AUTH: 발신 인증(SPF/DKIM/DMARC) 결과 분포, 사칭/위조 메일 현황. params: period\n"
                 + "- RULE_LIST: 룰 조회. params: keyword(없으면 빈 문자열)\n"
                 + "- RULE_STATS: 특정 룰의 적중 현황. params: ruleId(숫자, 특정 룰 지정이 없으면 0)\n"
                 + "- REPORT_PENDING: 검토 대기 중인 사용자 신고 조회. params: 없음\n"
@@ -134,6 +135,8 @@ public class ChatService {
                 return top(p);
             case "STATS_TREND":
                 return trend(p);
+            case "STATS_AUTH":
+                return authStats(p);
             case "RULE_LIST":
                 return ruleList(p);
             case "RULE_STATS":
@@ -276,6 +279,38 @@ public class ChatService {
             long ham = get(e.getValue(), MailEvent.HAM), spam = get(e.getValue(), MailEvent.SPAM),
                     rej = get(e.getValue(), MailEvent.REJECTED), def = get(e.getValue(), MailEvent.DEFERRED);
             r.rows.add(Arrays.<Object>asList(e.getKey(), ham, spam, rej, def, pct(spam, ham + spam + rej + def)));
+        }
+        return r;
+    }
+
+    private Reply authStats(JsonNode p) {
+        String per = period(p);
+        StatsPeriod sp = resolve(per);
+        Reply r = base("STATS_AUTH");
+        r.params.put("period", per);
+        if (!events.isEnabled()) {
+            r.answer = "이벤트 로그가 꺼져 있어 통계를 낼 수 없습니다(gateway.event-log.enabled).";
+            return r;
+        }
+        Map<String, Long> spf = events.authSummary("spf", sp.fromDay, sp.toDay);
+        Map<String, Long> dkim = events.authSummary("dkim", sp.fromDay, sp.toDay);
+        Map<String, Long> dmarc = events.authSummary("dmarc", sp.fromDay, sp.toDay);
+        long total = 0;
+        for (Long v : dmarc.values()) {
+            total += v;
+        }
+        if (total == 0 && spf.isEmpty() && dkim.isEmpty()) {
+            r.answer = periodLabel(sp) + " 기간에 발신 인증 결과가 기록된 메일이 없습니다.";
+            return r;
+        }
+        long dmarcFail = get(dmarc, "fail");
+        r.answer = periodLabel(sp) + " 발신 인증 결과입니다. DMARC 실패(사칭·위조 의심)는 " + dmarcFail + "건"
+                + (total > 0 ? "(" + pct(dmarcFail, total) + ")" : "") + "입니다.";
+        r.columns = Arrays.asList("결과", "SPF", "DKIM", "DMARC");
+        for (String k : Arrays.asList("pass", "fail", "softfail", "neutral", "none", "temperror", "permerror")) {
+            if (get(spf, k) + get(dkim, k) + get(dmarc, k) > 0) {
+                r.rows.add(Arrays.<Object>asList(k, get(spf, k), get(dkim, k), get(dmarc, k)));
+            }
         }
         return r;
     }

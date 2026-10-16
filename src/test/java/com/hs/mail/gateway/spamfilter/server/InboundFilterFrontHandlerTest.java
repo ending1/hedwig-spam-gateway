@@ -58,6 +58,9 @@ class InboundFilterFrontHandlerTest {
     private Channel serverChannel;
     private ExecutorService classifierExecutor;
     private int gatewayPort;
+    private com.hs.mail.gateway.auth.AuthChecker authChecker;
+    /** 룰기반 필터 사용 여부(기본 꺼짐: 기존 시나리오는 룰 없이 LLM 분류만 검증한다). */
+    private boolean enableRules;
 
     private void start(SpamClassifier classifier) throws Exception {
         GatewayProperties properties = new GatewayProperties();
@@ -81,6 +84,7 @@ class InboundFilterFrontHandlerTest {
         properties.getBackend().setHost("127.0.0.1");
         properties.getBackend().setPort(fakeBackend.getPort());
         properties.getSpamFilter().setEnabled(true);
+        properties.getRuleFilter().setEnabled(enableRules);
 
         classifierExecutor = Executors.newSingleThreadExecutor();
         ConnectionStats connectionStats = new ConnectionStats();
@@ -100,7 +104,8 @@ class InboundFilterFrontHandlerTest {
                                 .addLast(new StringEncoder())
                                 .addLast(new InboundFilterFrontHandler(properties, classifier, spamStats,
                                         connectionStats, classifierExecutor, greylistService,
-                                        mailListService, new RuleBasedSpamChecker(properties, com.hs.mail.gateway.spamfilter.SpamRuleService.defaults())));
+                                        mailListService, new RuleBasedSpamChecker(properties, com.hs.mail.gateway.spamfilter.SpamRuleService.defaults()))
+                                        .withAuthChecker(authChecker));
                     }
                 });
         serverChannel = bootstrap.bind(0).sync().channel();
@@ -421,5 +426,78 @@ class InboundFilterFrontHandlerTest {
         List<String> out = InboundFilterFrontHandler.stripSpamHeaders(in);
         assertEquals(java.util.Arrays.asList("Received: from x", "X-Spam-Level: ***", "Subject: hi", "", "X-Spam-Flag: YES", "body"), out);
         assertEquals(9, in.size(), "입력 목록은 바꾸지 않는다");
+    }
+
+    /** 고정 레코드를 돌려주는 가짜 DNS. */
+    private static com.hs.mail.gateway.auth.DnsLookup dns(java.util.Map<String, String> txt) {
+        return new com.hs.mail.gateway.auth.DnsLookup() {
+            public List<String> txt(String name) {
+                return txt.containsKey(name) ? java.util.Collections.singletonList(txt.get(name)) : new ArrayList<String>();
+            }
+
+            public List<String> addresses(String name) {
+                return new ArrayList<String>();
+            }
+
+            public List<String> mx(String name) {
+                return new ArrayList<String>();
+            }
+        };
+    }
+
+    @Test
+    void 인증_검증_결과가_Authentication_Results_헤더로_붙고_위조_헤더는_제거된다() throws Exception {
+        java.util.Map<String, String> records = new java.util.HashMap<>();
+        records.put("example.com", "v=spf1 ip4:127.0.0.1 -all");
+        records.put("_dmarc.example.com", "v=DMARC1; p=reject");
+        authChecker = new com.hs.mail.gateway.auth.AuthChecker(dns(records), new GatewayProperties());
+        start(fixedVerdictClassifier(false));
+        runTransaction("From: sender@example.com", "Authentication-Results: gateway-prod; spf=pass dkim=pass dmarc=pass");
+        fakeBackend.awaitDataCaptured(5, TimeUnit.SECONDS);
+        List<String> data = fakeBackend.getCapturedDataLines();
+        long ars = data.stream().filter(l -> l.toLowerCase().startsWith("authentication-results:")).count();
+        assertEquals(1, ars, "위조 헤더는 지워지고 게이트웨이가 붙인 것 하나만 남는다: " + data);
+        String ar = data.stream().filter(l -> l.toLowerCase().startsWith("authentication-results:")).findFirst().get();
+        assertTrue(ar.contains("spf=pass smtp.mailfrom=example.com"), ar);
+        assertTrue(ar.contains("dkim=none"), ar);
+        assertTrue(ar.contains("dmarc=pass (p=reject) header.from=example.com"), ar);
+    }
+
+    @Test
+    void SPF_DMARC_실패이고_정책이_reject면_스팸_헤더가_붙는다() throws Exception {
+        java.util.Map<String, String> records = new java.util.HashMap<>();
+        records.put("example.com", "v=spf1 ip4:203.0.113.9 -all");
+        records.put("_dmarc.example.com", "v=DMARC1; p=reject");
+        enableRules = true;
+        authChecker = new com.hs.mail.gateway.auth.AuthChecker(dns(records), new GatewayProperties());
+        start(fixedVerdictClassifier(false));
+        runTransaction("From: sender@example.com");
+        fakeBackend.awaitDataCaptured(5, TimeUnit.SECONDS);
+        String all = String.join("\n", fakeBackend.getCapturedDataLines());
+        assertTrue(all.contains("X-Spam-Flag: YES"), "SPF 실패 + DMARC reject 도메인 사칭은 스팸 태그: " + all);
+        assertTrue(all.contains("spf=fail") && all.contains("dmarc=fail (p=reject)"), all);
+    }
+
+    @Test
+    void 인증_DNS가_모두_장애여도_메일은_정상_전달된다() throws Exception {
+        authChecker = new com.hs.mail.gateway.auth.AuthChecker(new com.hs.mail.gateway.auth.DnsLookup() {
+            public List<String> txt(String n) throws TempFailure {
+                throw new TempFailure("down");
+            }
+
+            public List<String> addresses(String n) throws TempFailure {
+                throw new TempFailure("down");
+            }
+
+            public List<String> mx(String n) throws TempFailure {
+                throw new TempFailure("down");
+            }
+        }, new GatewayProperties());
+        start(fixedVerdictClassifier(false));
+        runTransaction("From: sender@example.com");
+        fakeBackend.awaitDataCaptured(5, TimeUnit.SECONDS);
+        String all = String.join("\n", fakeBackend.getCapturedDataLines());
+        assertFalse(all.contains("X-Spam-Flag"), "temperror는 감점하지 않는다");
+        assertTrue(all.contains("spf=temperror"), all);
     }
 }

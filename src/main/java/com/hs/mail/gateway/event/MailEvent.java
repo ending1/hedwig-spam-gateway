@@ -30,9 +30,19 @@ public class MailEvent {
     private final String subject;
     private final double score;
     private final String reason;
+    private final String spf;
+    private final String dkim;
+    private final String dmarc;
 
     public MailEvent(long eventAtMillis, String action, String filter, String clientIp, String fromAddr,
                      String fromDomain, String rcptDomain, int rcptCount, String subject, double score, String reason) {
+        this(eventAtMillis, action, filter, clientIp, fromAddr, fromDomain, rcptDomain, rcptCount, subject, score, reason,
+                "", "", "");
+    }
+
+    public MailEvent(long eventAtMillis, String action, String filter, String clientIp, String fromAddr,
+                     String fromDomain, String rcptDomain, int rcptCount, String subject, double score, String reason,
+                     String spf, String dkim, String dmarc) {
         this.eventAtMillis = eventAtMillis;
         this.action = action;
         this.filter = filter;
@@ -44,6 +54,9 @@ public class MailEvent {
         this.subject = subject;
         this.score = score;
         this.reason = reason;
+        this.spf = spf == null ? "" : spf;
+        this.dkim = dkim == null ? "" : dkim;
+        this.dmarc = dmarc == null ? "" : dmarc;
     }
 
     public long getEventAtMillis() { return eventAtMillis; }
@@ -57,4 +70,7 @@ public class MailEvent {
     public String getSubject() { return subject; }
     public double getScore() { return score; }
     public String getReason() { return reason; }
+    public String getSpf() { return spf; }
+    public String getDkim() { return dkim; }
+    public String getDmarc() { return dmarc; }
 }

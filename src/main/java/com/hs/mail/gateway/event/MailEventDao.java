@@ -45,13 +45,38 @@ public class MailEventDao {
     private final JdbcTemplate jdbcTemplate;
     private final GatewaySql sql;
 
+    /** SPF/DKIM/DMARC 결과 컬럼을 쓸 수 있는지. 이전 버전 테이블이면 기동 때 한 번 추가해 보고, 안 되면 인증 결과 없이 동작한다. */
+    private final boolean authColumns;
+
     public MailEventDao(JdbcTemplate jdbcTemplate, GatewaySql sql) {
         this.jdbcTemplate = jdbcTemplate;
         this.sql = sql;
+        this.authColumns = ensureAuthColumns();
+    }
+
+    private boolean ensureAuthColumns() {
+        try {
+            jdbcTemplate.execute(sql.get("mailevent.probeAuth"));
+            return true;
+        } catch (RuntimeException probe) {
+            try {
+                for (int i = 1; i <= 3; i++) {
+                    jdbcTemplate.execute(sql.get("mailevent.addAuthColumns." + i));
+                }
+                return true;
+            } catch (RuntimeException e) {
+                org.slf4j.LoggerFactory.getLogger(MailEventDao.class).warn("hw_mail_event 인증 결과 컬럼을 추가하지 못해 인증 결과 기록을 끕니다: {}", e.getMessage());
+                return false;
+            }
+        }
+    }
+
+    public boolean isAuthSupported() {
+        return authColumns;
     }
 
     public void insertBatch(List<MailEvent> events, java.util.function.Function<Long, String> dayOf) {
-        final String insert = sql.get("mailevent.insert");
+        final String insert = sql.get(authColumns ? "mailevent.insertAuth" : "mailevent.insert");
         jdbcTemplate.batchUpdate(insert, events, events.size(), (ps, e) -> {
             ps.setTimestamp(1, new Timestamp(e.getEventAtMillis()));
             ps.setString(2, dayOf.apply(e.getEventAtMillis()));
@@ -65,6 +90,11 @@ public class MailEventDao {
             ps.setString(10, e.getSubject());
             ps.setDouble(11, e.getScore());
             ps.setString(12, e.getReason());
+            if (authColumns) {
+                ps.setString(13, e.getSpf().isEmpty() ? null : e.getSpf());
+                ps.setString(14, e.getDkim().isEmpty() ? null : e.getDkim());
+                ps.setString(15, e.getDmarc().isEmpty() ? null : e.getDmarc());
+            }
         });
     }
 
@@ -112,17 +142,38 @@ public class MailEventDao {
     /** 로그 검색(최신순). ip/filter/action은 ALL이면 조건 없음, sender는 부분 일치(% 포함해서 전달). */
     public List<MailEvent> search(String fromDay, String toDay, String action, String filter, String ip,
                                   String senderLike, int limit) {
-        return jdbcTemplate.query(sql.get("mailevent.search"), rs -> {
+        return jdbcTemplate.query(sql.get(authColumns ? "mailevent.searchAuth" : "mailevent.search"), rs -> {
             List<MailEvent> rows = new ArrayList<>();
             int n = 0;
             while (n < limit && rs.next()) {
                 rows.add(new MailEvent(rs.getTimestamp("event_at").getTime(), rs.getString("action"),
                         rs.getString("filter_name"), rs.getString("client_ip"), rs.getString("from_addr"),
                         rs.getString("from_domain"), rs.getString("rcpt_domain"), rs.getInt("rcpt_count"),
-                        rs.getString("subject"), rs.getDouble("score"), rs.getString("reason")));
+                        rs.getString("subject"), rs.getDouble("score"), rs.getString("reason"),
+                        authColumns ? rs.getString("spf_result") : "", authColumns ? rs.getString("dkim_result") : "",
+                        authColumns ? rs.getString("dmarc_result") : ""));
                 n++;
             }
             return rows;
         }, fromDay, toDay, action, action, filter, filter, ip, ip, senderLike, senderLike);
+    }
+
+    /** 인증 방식(spf|dkim|dmarc)별 결과 건수: 결과 토큰 -> 건수. 컬럼을 쓸 수 없으면 빈 맵. */
+    public Map<String, Long> authSummary(String mechanism, String fromDay, String toDay) {
+        String col;
+        switch (mechanism) {
+            case "spf": col = "spf_result"; break;
+            case "dkim": col = "dkim_result"; break;
+            case "dmarc": col = "dmarc_result"; break;
+            default: return new LinkedHashMap<>();
+        }
+        Map<String, Long> m = new LinkedHashMap<>();
+        if (!authColumns) {
+            return m;
+        }
+        jdbcTemplate.query(sql.get("mailevent.authSummary").replace("%COL%", col), rs -> {
+            m.put(rs.getString(1), rs.getLong(2));
+        }, fromDay, toDay);
+        return m;
     }
 }

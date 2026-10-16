@@ -85,6 +85,25 @@ public class MailStatsController {
         return ResponseEntity.ok(rows);
     }
 
+    /** SPF/DKIM/DMARC 결과 분포: {spf:{pass:n,...}, dkim:{...}, dmarc:{...}}. */
+    @GetMapping("/stats/auth")
+    public ResponseEntity<?> auth(@RequestHeader(value = "X-Admin-Key", required = false) String key,
+                                   @RequestParam(required = false) String from,
+                                   @RequestParam(required = false) String to,
+                                   @RequestParam(required = false) String period) {
+        if (!guard.isAuthorized(key)) {
+            return error(HttpStatus.UNAUTHORIZED, "invalid X-Admin-Key");
+        }
+        StatsPeriod p = StatsPeriod.of(from, to, period, LocalDate.now());
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("from", p.fromDay);
+        res.put("to", p.toDay);
+        for (String m : new String[] {"spf", "dkim", "dmarc"}) {
+            res.put(m, events.authSummary(m, p.fromDay, p.toDay));
+        }
+        return ResponseEntity.ok(res);
+    }
+
     @GetMapping("/stats/top")
     public ResponseEntity<?> top(@RequestHeader(value = "X-Admin-Key", required = false) String key,
                                   @RequestParam(defaultValue = "domain") String dimension,
@@ -146,6 +165,7 @@ public class MailStatsController {
             m.put("subject", e.getSubject());
             m.put("score", e.getScore());
             m.put("reason", e.getReason());
+            m.put("auth", authText(e));
             out.add(m);
         }
         return ResponseEntity.ok(out);
@@ -168,19 +188,26 @@ public class MailStatsController {
         if (rows == null) {
             return error(HttpStatus.BAD_REQUEST, "action 또는 filter 값이 올바르지 않습니다");
         }
-        StringBuilder sb = new StringBuilder("﻿시각,처리,필터,IP,발신자,수신 도메인,수신자 수,제목,점수,사유\r\n");
+        StringBuilder sb = new StringBuilder("﻿시각,처리,필터,IP,발신자,수신 도메인,수신자 수,제목,점수,사유,인증(SPF/DKIM/DMARC)\r\n");
         for (MailEvent e : rows) {
             sb.append(csv(TS.format(Instant.ofEpochMilli(e.getEventAtMillis())))).append(',')
                     .append(csv(e.getAction())).append(',').append(csv(e.getFilter())).append(',')
                     .append(csv(e.getClientIp())).append(',').append(csv(e.getFromAddr())).append(',')
                     .append(csv(e.getRcptDomain())).append(',').append(e.getRcptCount()).append(',')
                     .append(csv(e.getSubject())).append(',').append(e.getScore()).append(',')
-                    .append(csv(e.getReason())).append("\r\n");
+                    .append(csv(e.getReason())).append(',').append(csv(authText(e))).append("\r\n");
         }
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"mail-events.csv\"")
                 .contentType(new MediaType("text", "csv", StandardCharsets.UTF_8))
                 .body(sb.toString().getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static String authText(MailEvent e) {
+        if (e.getSpf().isEmpty() && e.getDkim().isEmpty() && e.getDmarc().isEmpty()) {
+            return "";
+        }
+        return "S:" + e.getSpf() + " D:" + e.getDkim() + " M:" + e.getDmarc();
     }
 
     private List<MailEvent> query(String from, String to, String period, String action, String filter, String ip,

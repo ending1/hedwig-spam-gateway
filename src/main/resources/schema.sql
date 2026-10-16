@@ -82,7 +82,10 @@ CREATE TABLE IF NOT EXISTS hw_mail_event (
     rcpt_count INT DEFAULT 0,
     subject VARCHAR(200),
     score DOUBLE DEFAULT 0,
-    reason VARCHAR(500)
+    reason VARCHAR(500),
+    spf_result VARCHAR(10),
+    dkim_result VARCHAR(10),
+    dmarc_result VARCHAR(10)
 );
 CREATE INDEX IF NOT EXISTS idx_hw_mail_event_day ON hw_mail_event (event_day, action);
 

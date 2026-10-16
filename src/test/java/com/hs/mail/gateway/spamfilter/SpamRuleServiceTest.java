@@ -126,8 +126,28 @@ class SpamRuleServiceTest {
 
         new SpamRuleService(filledDao);
 
-        org.mockito.Mockito.verify(filledDao, org.mockito.Mockito.never())
-                .insert(org.mockito.ArgumentMatchers.any(SpamRuleEntry.class));
+        // 기본 룰셋은 다시 넣지 않는다. 발신 인증 도입 전 DB를 위해 없는 auth-* 구조 룰 행만 채운다.
+        org.mockito.Mockito.verify(filledDao, org.mockito.Mockito.never()).insert(org.mockito.ArgumentMatchers.argThat(
+                e -> !(e.getRuleType() == SpamRuleEntry.RuleType.STRUCTURAL && e.getPattern().startsWith("auth-"))));
+        org.mockito.Mockito.verify(filledDao, org.mockito.Mockito.times(6)).insert(org.mockito.ArgumentMatchers.argThat(
+                e -> e.getRuleType() == SpamRuleEntry.RuleType.STRUCTURAL && e.getPattern().startsWith("auth-")));
+    }
+
+    @Test
+    void 이미_auth_룰_행이_있으면_다시_넣지_않는다() {
+        SpamRuleDao dao2 = mock(SpamRuleDao.class);
+        java.util.List<SpamRuleEntry> have = new java.util.ArrayList<>();
+        long id = 1;
+        for (SpamRuleEntry seed : SpamRuleService.seedEntries()) {
+            if (seed.getPattern().startsWith("auth-")) {
+                have.add(new SpamRuleEntry(id++, seed.getRuleType(), seed.getPattern(), seed.getWeight(), seed.isEnabled(), seed.getReason()));
+            }
+        }
+        when(dao2.findAll()).thenReturn(have);
+
+        new SpamRuleService(dao2);
+
+        org.mockito.Mockito.verify(dao2, org.mockito.Mockito.never()).insert(org.mockito.ArgumentMatchers.any(SpamRuleEntry.class));
     }
 
     @Test

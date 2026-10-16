@@ -62,6 +62,13 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
 
     /** 통계/로그용 이벤트 기록기(선택). 없으면 기록하지 않는다. */
     private MailEventService mailEvents;
+    /** 수신 메일 인증(SPF/DKIM/DMARC) 검증기(선택). 없거나 꺼져 있으면 검증하지 않는다. */
+    private com.hs.mail.gateway.auth.AuthChecker authChecker;
+
+    public InboundFilterFrontHandler withAuthChecker(com.hs.mail.gateway.auth.AuthChecker authChecker) {
+        this.authChecker = authChecker;
+        return this;
+    }
 
     public InboundFilterFrontHandler withMailEvents(MailEventService mailEvents) {
         this.mailEvents = mailEvents;
@@ -148,6 +155,10 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
         }
 
         sendToBackend(line);
+
+        if (upper.startsWith("EHLO ") || upper.startsWith("HELO ")) {
+            session.helo = line.substring(5).trim();
+        }
 
         if (upper.startsWith("MAIL FROM")) {
             Matcher m = MAIL_FROM_PATTERN.matcher(line);
@@ -239,6 +250,7 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
     private void classifyAndForward(ChannelHandlerContext ctx) {
         // 위조된 X-Spam-* 헤더는 판정 전에 제거한다. 룰/LLM이 그 값을 근거로 삼아 오판하지 않게 하고(실제로 LLM이
         // 위조 헤더를 보고 스팸으로 판정한 사례가 있었다), 전달할 때는 게이트웨이 자신의 판정 헤더만 붙는다.
+        session.authResult = null; // 이전 메일의 인증 결과가 남지 않게
         List<String> bufferedLines = stripSpamHeaders(session.dataBuffer);
         if (bufferedLines.size() != session.dataBuffer.size()) {
             log.warn("들어온 메일의 X-Spam-* 헤더를 제거했습니다(위조 방지): from={}", session.mailFrom);
@@ -253,10 +265,36 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
             return;
         }
 
+        if (authChecker != null && authChecker.isEnabled()) {
+            // SPF/DKIM/DMARC는 DNS 조회가 있어 블로킹이므로 별도 스레드에서 하고 끝나면 이벤트 루프로 돌아온다(fail-open).
+            ctx.channel().config().setAutoRead(false);
+            final String ip = clientIp(ctx);
+            final String helo = session.helo;
+            final String envFrom = session.mailFrom;
+            classifierExecutor.submit(() -> {
+                com.hs.mail.gateway.auth.AuthResult ar;
+                try {
+                    ar = authChecker.check(ip, helo, envFrom, bufferedLines);
+                } catch (RuntimeException e) {
+                    log.warn("인증 검증 실패, 검증 없이 계속한다: {}", e.getMessage());
+                    ar = com.hs.mail.gateway.auth.AuthResult.none();
+                }
+                final com.hs.mail.gateway.auth.AuthResult result = ar;
+                ctx.channel().eventLoop().execute(() -> {
+                    session.authResult = result;
+                    continueClassify(ctx, bufferedLines);
+                });
+            });
+            return;
+        }
+        continueClassify(ctx, bufferedLines);
+    }
+
+    private void continueClassify(ChannelHandlerContext ctx, List<String> bufferedLines) {
         String mailFrom = session.mailFrom;
         List<String> recipients = session.recipients;
         SpamCheckRequest request = SpamCheckRequest.from(mailFrom, recipients, bufferedLines,
-                properties.getSpamFilter().getMaxBodyChars(), clientIp(ctx));
+                properties.getSpamFilter().getMaxBodyChars(), clientIp(ctx)).withAuth(session.authResult);
 
         if (properties.getRuleFilter().isEnabled()) {
             SpamVerdict ruleVerdict = ruleBasedSpamChecker.evaluate(request);
@@ -297,7 +335,9 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
             return false;
         }
         String name = line.substring(0, colon).trim().toLowerCase(java.util.Locale.ROOT);
-        return name.equals("x-spam-flag") || name.equals("x-spam-score") || name.equals("x-spam-provider");
+        // Authentication-Results도 게이트웨이만 붙여야 한다(외부가 spf=pass를 위조해 넣는 것을 막는다, RFC 8601 5절).
+        return name.equals("x-spam-flag") || name.equals("x-spam-score") || name.equals("x-spam-provider")
+                || name.equals("authentication-results");
     }
 
     /** 들어온 메일의 헤더 영역에서 게이트웨이 스팸 판정 헤더(접힌 줄 포함)를 제거한 새 목록을 돌려준다. 본문은 건드리지 않는다. */
@@ -345,7 +385,10 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
             }
             mailEvents.record(new MailEvent(System.currentTimeMillis(), action, filter, ip,
                     cut(fromAddr, 255), cut(fromDomain, 255), cut(rcptDomain, 255),
-                    rcpts == null ? 0 : rcpts.size(), cut(RagText.mask(subject), 200), score, cut(reason, 500)));
+                    rcpts == null ? 0 : rcpts.size(), cut(RagText.mask(subject), 200), score, cut(reason, 500),
+                    session.authResult == null ? "" : session.authResult.spf,
+                    session.authResult == null ? "" : session.authResult.dkim,
+                    session.authResult == null ? "" : session.authResult.dmarc));
         } catch (RuntimeException e) {
             log.debug("이벤트 기록 실패(무시): {}", e.getMessage());
         }
@@ -380,6 +423,9 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
             String subject = SpamCheckRequest.from(session.mailFrom, session.recipients, bufferedLines, 1).getSubject();
             recordEvent(verdict.isSpam() ? MailEvent.SPAM : MailEvent.HAM, filterOf(verdict), clientIp(ctx),
                     session.mailFrom, session.recipients, subject, verdict.getScore(), verdict.getReason());
+        }
+        if (session.authResult != null) {
+            backendChannel.write("Authentication-Results: " + session.authResult.headerValue(properties.getInstanceId()) + "\r\n");
         }
         if (verdict.isSpam()) {
             spamStats.recordSpam();

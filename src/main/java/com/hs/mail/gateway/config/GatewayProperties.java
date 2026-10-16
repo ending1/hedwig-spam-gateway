@@ -33,6 +33,7 @@ public class GatewayProperties {
     private final Admin admin = new Admin();
     private final EventLog eventLog = new EventLog();
     private final Chat chat = new Chat();
+    private final Auth auth = new Auth();
     private final SpamReportOptions spamReport = new SpamReportOptions();
 
     public int getListenPort() {
@@ -121,6 +122,27 @@ public class GatewayProperties {
 
     public Chat getChat() {
         return chat;
+    }
+
+    public Auth getAuth() {
+        return auth;
+    }
+
+    /**
+     * 수신 메일 인증 검증(SPF/DKIM/DMARC). 결과는 Authentication-Results 헤더와 룰 점수(auth-* 구조 룰)로만 쓰이며
+     * 메일을 거부하지 않는다. DNS 조회가 많아 메일당 전체 시간 상한(timeoutMillis)을 두고, 초과/오류는 temperror(통과).
+     */
+    public static class Auth {
+        private boolean enabled = true;
+        private int timeoutMillis = 6000;
+        private int dnsTimeoutMillis = 2000;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public int getTimeoutMillis() { return timeoutMillis; }
+        public void setTimeoutMillis(int timeoutMillis) { this.timeoutMillis = timeoutMillis; }
+        public int getDnsTimeoutMillis() { return dnsTimeoutMillis; }
+        public void setDnsTimeoutMillis(int dnsTimeoutMillis) { this.dnsTimeoutMillis = dnsTimeoutMillis; }
     }
 
     /**

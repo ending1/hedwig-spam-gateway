@@ -13,6 +13,9 @@ CREATE TABLE hw_mail_event (
   subject      VARCHAR(200),
   score        DOUBLE DEFAULT 0,
   reason       VARCHAR(500),
+  spf_result   VARCHAR(10),
+  dkim_result  VARCHAR(10),
+  dmarc_result VARCHAR(10),
   PRIMARY KEY (id),
   KEY idx_hw_mail_event_day (event_day, action)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT = '메일 처리 이벤트 로그';

@@ -33,6 +33,18 @@ public class SpamCheckRequest {
         return clientIp;
     }
 
+    /** SPF/DKIM/DMARC 검증 결과(없으면 null). 룰기반 필터가 auth-* 구조 룰 점수에 쓴다. */
+    private com.hs.mail.gateway.auth.AuthResult auth;
+
+    public com.hs.mail.gateway.auth.AuthResult getAuth() {
+        return auth;
+    }
+
+    public SpamCheckRequest withAuth(com.hs.mail.gateway.auth.AuthResult auth) {
+        this.auth = auth;
+        return this;
+    }
+
     public String getFrom() {
         return from;
     }
