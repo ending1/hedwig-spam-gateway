@@ -126,13 +126,15 @@ public class AdminDashboardController {
                 "</section>\n" +
                 "<section class=\"tab-panel\" id=\"tab-chat\">\n" +
                 "  <h2>AI 챗 - 스팸 서버 질의</h2>\n" +
-                "  <p style=\"font-size:0.85rem;color:#555\">통계와 룰 현황을 말로 물어보세요. 챗봇은 조회만 하며 룰이나 설정을 바꾸지 않습니다. 답변은 서버가 직접 조회한 값입니다.</p>\n" +
+                "  <p style=\"font-size:0.85rem;color:#555\">통계와 룰 현황을 말로 물어보세요. 룰 변경(추가, 켜기/끄기, 가중치)을 말하면 챗봇은 <b>제안</b>만 만들고, 아래 [적용]을 눌러야 반영됩니다. 모든 변경은 이력에 남습니다.</p>\n" +
                 "  <div id=\"chatSamples\" style=\"margin:0.5rem 0\"></div>\n" +
                 "  <div id=\"chatLog\" style=\"background:white;border:1px solid #ddd;border-radius:8px;padding:0.8rem;min-height:200px;max-height:460px;overflow:auto\"></div>\n" +
                 "  <form id=\"chatForm\" onsubmit=\"return false\">\n" +
                 "    <input id=\"chatInput\" placeholder=\"예: 어제 스팸 몇 건이야?\" size=\"60\" maxlength=\"300\" autocomplete=\"off\">\n" +
                 "    <button id=\"chatSend\">질문</button>\n" +
                 "  </form>\n" +
+                "  <h3>최근 변경 이력 <button type=\"button\" id=\"auditReload\" style=\"font-size:0.75rem\">새로고침</button></h3>\n" +
+                "  <table id=\"auditTable\"><thead><tr><th>시각</th><th>관리자</th><th>경로</th><th>동작</th><th>대상</th><th>변경 전</th><th>변경 후</th></tr></thead><tbody></tbody></table>\n" +
                 "</section>\n" +
                 "<section class=\"tab-panel\" id=\"tab-events\">\n" +
                 "  <h2>메일 처리 통계·로그</h2>\n" +
@@ -293,11 +295,34 @@ public class AdminDashboardController {
                 "      h += '<table style=\"margin-top:0.4rem;width:auto\"><thead><tr>' + b.columns.map(c => '<th>' + escapeHtml(c) + '</th>').join('') + '</tr></thead><tbody>' +\n" +
                 "        b.rows.map(r => '<tr>' + r.map(v => '<td>' + escapeHtml(String(v)) + '</td>').join('') + '</tr>').join('') + '</tbody></table>';\n" +
                 "    }\n" +
+                "    if (b.proposal) {\n" +
+                "      const pr = b.proposal;\n" +
+                "      h += '<div style=\"margin-top:0.5rem;border:2px solid #f59e0b;border-radius:8px;padding:0.6rem;background:#fffbeb\"><b>변경 제안</b><br>' +\n" +
+                "        (pr.before ? '현재: ' + escapeHtml(pr.before) + '<br>' : '') + '변경: <b>' + escapeHtml(pr.after) + '</b>' +\n" +
+                "        (pr.warn ? '<br><span style=\"color:#b45309\">⚠ ' + escapeHtml(pr.warn) + '</span>' : '') +\n" +
+                "        '<br><button type=\"button\" class=\"pr-apply\" data-id=\"' + pr.id + '\">적용</button> <button type=\"button\" class=\"pr-cancel\" style=\"background:#6b7280\" data-id=\"' + pr.id + '\">취소</button></div>';\n" +
+                "    }\n" +
                 "    wait.innerHTML = h;\n" +
                 "  } catch (e) { wait.innerHTML = '<span style=\"color:#dc2626\">요청에 실패했습니다</span>'; }\n" +
                 "}\n" +
                 "document.getElementById('chatSamples').innerHTML = CHAT_SAMPLES.map(s => '<button type=\"button\" class=\"chip\" style=\"background:#e5e7eb;color:#111;margin:0 0.3rem 0.3rem 0\">' + escapeHtml(s) + '</button>').join('');\n" +
                 "document.getElementById('chatSamples').addEventListener('click', (e) => { const b = e.target.closest('.chip'); if (b) chatAsk(b.textContent); });\n" +
+                "document.getElementById('chatLog').addEventListener('click', async (e) => {\n" +
+                "  const ap = e.target.closest('.pr-apply'), ca = e.target.closest('.pr-cancel');\n" +
+                "  const btn = ap || ca; if (!btn) return;\n" +
+                "  const box = btn.parentElement; box.querySelectorAll('button').forEach(x => x.disabled = true);\n" +
+                "  const res = await adminFetch('/admin/chat/proposals/' + btn.dataset.id + (ap ? '/apply' : '/cancel'), { method: 'POST' });\n" +
+                "  let msg = ap ? '' : '제안을 취소했습니다.';\n" +
+                "  if (ap) { const b = await res.json(); msg = res.ok ? b.message : '적용하지 못했습니다: ' + b.error; }\n" +
+                "  box.innerHTML = '<b>' + (ap && res.ok ? '✔ ' : '') + escapeHtml(msg) + '</b>';\n" +
+                "  if (ap && res.ok) { loadRules(); loadAudit(); }\n" +
+                "});\n" +
+                "async function loadAudit() {\n" +
+                "  const res = await adminFetch('/admin/audit?limit=15'); if (!res.ok) return;\n" +
+                "  const rows = await res.json();\n" +
+                "  document.querySelector('#auditTable tbody').innerHTML = rows.map(x => '<tr><td>' + x.at + '</td><td>' + escapeHtml(x.actor) + '</td><td>' + escapeHtml(x.source) + '</td><td>' + escapeHtml(x.action) + '</td><td>' + escapeHtml(x.target) + '</td><td>' + escapeHtml(x.before || '') + '</td><td>' + escapeHtml(x.after || '') + '</td></tr>').join('') || '<tr><td colspan=\"7\">변경 이력 없음</td></tr>';\n" +
+                "}\n" +
+                "document.getElementById('auditReload').addEventListener('click', loadAudit);\n" +
                 "document.getElementById('chatSend').addEventListener('click', () => chatAsk(document.getElementById('chatInput').value));\n" +
                 "document.getElementById('chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); chatAsk(e.target.value); } });\n" +
                 "const EV_LABEL = { HAM: '정상', SPAM: '스팸', REJECTED: '거부', DEFERRED: '지연' };\n" +
@@ -358,6 +383,7 @@ public class AdminDashboardController {
                 "});\n" +
                 "document.getElementById('tabs').addEventListener('click', (e) => {\n" +
                 "  const b = e.target.closest('.tab'); if (b && b.dataset.tab === 'events') loadEventStats();\n" +
+                "  if (b && b.dataset.tab === 'chat') loadAudit();\n" +
                 "});\n" +
                 "function showTab(name) {\n" +
                 "  if (!document.getElementById('tab-' + name)) name = 'rules';\n" +

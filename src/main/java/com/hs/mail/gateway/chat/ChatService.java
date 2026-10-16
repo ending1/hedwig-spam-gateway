@@ -56,6 +56,8 @@ public class ChatService {
         public String answer;
         public List<String> columns = new ArrayList<>();
         public List<List<Object>> rows = new ArrayList<>();
+        /** 룰 변경 제안(관리자가 확인 버튼을 눌러야 적용). 없으면 null. */
+        public Map<String, Object> proposal;
     }
 
     private final IntentModel model;
@@ -64,9 +66,11 @@ public class ChatService {
     private final RuleStatService ruleStats;
     private final SpamReportService reports;
     private final GatewayProperties.Chat config;
+    private final ChangeService changes;
 
     public ChatService(IntentModel model, MailEventService events, SpamRuleService rules, RuleStatService ruleStats,
-                       SpamReportService reports, GatewayProperties properties) {
+                       SpamReportService reports, ChangeService changes, GatewayProperties properties) {
+        this.changes = changes;
         this.model = model;
         this.events = events;
         this.rules = rules;
@@ -94,7 +98,7 @@ public class ChatService {
                 + "출력 형식 예: {\"intent\":\"STATS_TOP\",\"params\":{\"dimension\":\"domain\",\"period\":\"yesterday\",\"limit\":5,\"action\":\"SPAM\"}}";
     }
 
-    public Reply ask(String question) throws ChatException {
+    public Reply ask(String question, String actor) throws ChatException {
         String q = question == null ? "" : question.trim();
         if (q.isEmpty()) {
             throw new ChatException("질문을 입력해 주세요.");
@@ -119,10 +123,10 @@ public class ChatService {
             log.debug("의도 JSON 해석 실패: {}", raw);
         }
         log.info("챗봇 질문 의도={} (질문 {}자)", intent, q.length());
-        return dispatch(intent, params);
+        return dispatch(intent, params, actor);
     }
 
-    Reply dispatch(String intent, JsonNode p) {
+    Reply dispatch(String intent, JsonNode p, String actor) {
         switch (intent) {
             case "STATS_SUMMARY":
                 return summary(p);
@@ -137,7 +141,7 @@ public class ChatService {
             case "REPORT_PENDING":
                 return pendingReports();
             case "CHANGE_PROPOSAL":
-                return changeProposal(p);
+                return changeProposal(p, actor);
             default:
                 return unknown();
         }
@@ -376,14 +380,19 @@ public class ChatService {
         return r;
     }
 
-    private Reply changeProposal(JsonNode p) {
+    private Reply changeProposal(JsonNode p, String actor) {
         Reply r = base("CHANGE_PROPOSAL");
-        String action = p.path("action").asText("");
-        r.params.put("action", whitelist(action, "add", "disable", "enable", "set_weight"));
+        String action = whitelist(p.path("action").asText(""), "add", "disable", "enable", "set_weight");
+        r.params.put("action", action);
         r.params.put("target", cut(p.path("target").asText("")));
         r.params.put("value", cut(p.path("value").asText("")));
-        r.answer = "룰이나 설정을 챗봇이 직접 바꾸는 기능은 아직 제공하지 않습니다(다음 단계에서 '제안 후 관리자 확인' 방식으로 제공할 예정입니다). "
-                + "지금은 대시보드의 '룰 관리' 탭에서 직접 변경해 주세요.";
+        try {
+            ChangeService.Proposal prop = changes.propose(action, p.path("target").asText(""), p.path("value").asText(""), actor);
+            r.answer = "다음 변경을 제안합니다. 아래 내용을 확인하고 [적용]을 눌러야 반영됩니다(10분 안에).";
+            r.proposal = prop.toMap();
+        } catch (ChangeService.ChangeException e) {
+            r.answer = e.getMessage();
+        }
         return r;
     }
 

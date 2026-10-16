@@ -59,6 +59,7 @@ public class SpamRuleAdminController {
             }
         }
         SpamRuleEntry created = ruleService.add(parsed);
+        audit("RULE_ADD", "#" + created.getId(), null, describe(created));
         return ResponseEntity.ok(toMap(created));
     }
 
@@ -79,7 +80,9 @@ public class SpamRuleAdminController {
                 return badRequest(invalidRegexError);
             }
         }
+        String before = describe(find(id));
         ruleService.update(id, parsed);
+        audit("RULE_UPDATE", "#" + id, before, describe(parsed));
         return ResponseEntity.ok(toMap(new SpamRuleEntry(id, parsed.getRuleType(), parsed.getPattern(),
                 parsed.getWeight(), parsed.isEnabled(), parsed.getReason())));
     }
@@ -90,8 +93,40 @@ public class SpamRuleAdminController {
         if (!apiKeyGuard.isAuthorized(apiKey)) {
             return unauthorized();
         }
+        String before = describe(find(id));
         ruleService.remove(id);
+        audit("RULE_DELETE", "#" + id, before, null);
         return ResponseEntity.noContent().build();
+    }
+
+    private com.hs.mail.gateway.audit.AuditService auditService;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setAuditService(com.hs.mail.gateway.audit.AuditService auditService) {
+        this.auditService = auditService;
+    }
+
+    private void audit(String action, String target, String before, String after) {
+        if (auditService != null) {
+            auditService.record(apiKeyGuard.currentActor(), "DASHBOARD", action, target, before, after);
+        }
+    }
+
+    private SpamRuleEntry find(long id) {
+        for (SpamRuleEntry e : ruleService.list()) {
+            if (e.getId() != null && e.getId() == id) {
+                return e;
+            }
+        }
+        return null;
+    }
+
+    static String describe(SpamRuleEntry e) {
+        if (e == null) {
+            return null;
+        }
+        String pat = e.getPattern().length() > 80 ? e.getPattern().substring(0, 80) + "…" : e.getPattern();
+        return e.getRuleType() + " '" + pat + "' 가중치 " + e.getWeight() + (e.isEnabled() ? "" : " (비활성)");
     }
 
     /** 등록 전 정규식 컴파일을 검증해 잘못된(또는 ReDoS 위험이 큰) 패턴을 사전에 걸러낸다. */

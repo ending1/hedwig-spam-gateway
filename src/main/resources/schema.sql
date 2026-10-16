@@ -85,3 +85,14 @@ CREATE TABLE IF NOT EXISTS hw_mail_event (
     reason VARCHAR(500)
 );
 CREATE INDEX IF NOT EXISTS idx_hw_mail_event_day ON hw_mail_event (event_day, action);
+
+CREATE TABLE IF NOT EXISTS hw_admin_audit (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    event_at TIMESTAMP NOT NULL,
+    actor VARCHAR(100),
+    source VARCHAR(20) NOT NULL,
+    action VARCHAR(30) NOT NULL,
+    target VARCHAR(200),
+    before_val VARCHAR(500),
+    after_val VARCHAR(500)
+);

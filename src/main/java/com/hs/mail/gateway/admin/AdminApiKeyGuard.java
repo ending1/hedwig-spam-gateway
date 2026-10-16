@@ -57,6 +57,18 @@ public class AdminApiKeyGuard {
         return hasValidSession();
     }
 
+    /** 지금 요청의 관리자 식별자: 로그인 세션이면 사용자 ID, 아니면 "api-key". 변경 이력에 쓴다. */
+    public String currentActor() {
+        RequestAttributes attrs = RequestContextHolder.getRequestAttributes();
+        if (attrs instanceof ServletRequestAttributes) {
+            AdminSessionService.Session s = sessions.validate(sessionToken(((ServletRequestAttributes) attrs).getRequest()));
+            if (s != null && s.getUsername() != null) {
+                return s.getUsername();
+            }
+        }
+        return "api-key";
+    }
+
     private boolean hasValidSession() {
         RequestAttributes attrs = RequestContextHolder.getRequestAttributes();
         if (!(attrs instanceof ServletRequestAttributes)) {
