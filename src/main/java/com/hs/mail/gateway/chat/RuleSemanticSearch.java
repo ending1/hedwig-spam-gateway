@@ -47,6 +47,9 @@ public class RuleSemanticSearch {
     }
 
     public boolean isAvailable() {
+        if (config.isGemini()) {
+            return true;
+        }
         return config.getEmbedModel() != null && !config.getEmbedModel().trim().isEmpty()
                 && config.getBaseUrl() != null && !config.getBaseUrl().trim().isEmpty();
     }

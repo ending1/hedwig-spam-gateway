@@ -150,3 +150,9 @@ gateway:
 - 사용자별 리스트(recipient 지정)는 챗에서 다루지 않는다(전역만).
 - 테스트 `ChangeServiceExtTest` 7건(전체 235건). `tools/chat-bench.js`에 11문항 추가(70문항) — **egov 배포·측정은 미완료**.
 - egov 배포: 새 jar가 `/home/egov/hedwig_spam_prod/hedwig-spam-gateway.jar`에 복사됐으나 재시작은 하지 않았다(실행 중 프로세스는 이전 코드). 재시작: root로 `GATEWAY_PNAME=HEDWIG_SPAM_GATEWAY_PROD JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 bin/stop.sh && bin/start.sh`. 롤백 jar: `.bak_20261016_prelistchg`.
+
+## AI 챗 모델 대체: Gemini (2026-10-17)
+- kube(Ollama) 장애 대비로 `gateway.chat.provider: gemini` 추가(기본 `ollama`). 의도 분류는 Gemini `generateContent`(JSON 응답 강제, 온도 0), 룰 의미 검색은 `gemini-embedding-001`(`gateway.chat.gemini-embed-model`)을 쓴다. 키/모델은 스팸 분류용 `gateway.spam-filter.gemini.api-key/model`을 공유하며, 키는 URL이 아니라 `x-goog-api-key` 헤더로 보낸다. 환경변수 `GATEWAY_SPAMFILTER_GEMINI_APIKEY`로도 줄 수 있다.
+- 주의: 이 모드에서는 관리자 질문과 룰 패턴 텍스트가 Google로 전송된다(Ollama 모드는 사내망 안).
+- 70문항 측정: Gemini 의도 69/70·값 74/74(중앙값 0.96초) / 로컬 PC gemma:7b(구형) 11/70 — 의도 분류에는 부적합 / kube qwen3-coder:30b 68/70.
+- 메모: 화이트/블랙리스트 캐시는 `gateway.mail-list.enabled=true`일 때만 갱신된다(꺼져 있으면 챗 리스트 변경이 화면에 안 보임).

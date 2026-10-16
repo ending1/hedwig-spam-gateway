@@ -21,13 +21,36 @@ public class OllamaIntentModel implements IntentModel {
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private final GatewayProperties.Chat config;
+    private final GatewayProperties.SpamFilter.Gemini gemini;
 
     public OllamaIntentModel(GatewayProperties properties) {
         this.config = properties.getChat();
+        this.gemini = properties.getSpamFilter().getGemini();
+    }
+
+    /** Gemini generateContent: 시스템 지시 + JSON 응답 강제, 온도 0. 키는 URL이 아니라 헤더로 보낸다. */
+    private String completeGemini(String system, String user) throws Exception {
+        if (gemini.getApiKey() == null || gemini.getApiKey().trim().isEmpty()) {
+            throw new IllegalStateException("gateway.spam-filter.gemini.api-key가 설정되지 않았습니다");
+        }
+        ObjectNode body = MAPPER.createObjectNode();
+        body.putObject("systemInstruction").putArray("parts").addObject().put("text", system);
+        body.putArray("contents").addObject().put("role", "user").putArray("parts").addObject().put("text", user);
+        ObjectNode gen = body.putObject("generationConfig");
+        gen.put("temperature", 0);
+        gen.put("responseMimeType", "application/json");
+        java.util.Map<String, String> headers = new java.util.HashMap<>();
+        headers.put("x-goog-api-key", gemini.getApiKey());
+        String url = "https://generativelanguage.googleapis.com/v1beta/models/" + gemini.getModel() + ":generateContent";
+        String resp = com.hs.mail.gateway.spamfilter.HttpJsonClient.postJson(url, headers, MAPPER.writeValueAsString(body), config.getTimeoutMillis());
+        return MAPPER.readTree(resp).path("candidates").path(0).path("content").path("parts").path(0).path("text").asText("");
     }
 
     @Override
     public String complete(String system, String user) throws Exception {
+        if (config.isGemini()) {
+            return completeGemini(system, user);
+        }
         String base = config.getBaseUrl();
         if (base == null || base.trim().isEmpty()) {
             throw new IllegalStateException("gateway.chat.base-url이 설정되지 않았습니다");

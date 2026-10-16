@@ -272,6 +272,16 @@ public class GatewayProperties {
         /** 의미 검색에서 이 값 미만으로 비슷한 룰은 결과에 넣지 않는다(코사인 유사도). */
         private double semanticMinSimilarity = 0.55;
 
+        /** ollama(기본) 또는 gemini. gemini면 gateway.spam-filter.gemini의 키/모델로 Google API를 부른다(임시 대체용). */
+        private String provider = "ollama";
+        private String geminiEmbedModel = "gemini-embedding-001";
+
+        public String getProvider() { return provider; }
+        public void setProvider(String provider) { this.provider = provider; }
+        public boolean isGemini() { return "gemini".equalsIgnoreCase(provider == null ? "" : provider.trim()); }
+        public String getGeminiEmbedModel() { return geminiEmbedModel; }
+        public void setGeminiEmbedModel(String geminiEmbedModel) { this.geminiEmbedModel = geminiEmbedModel; }
+
         public String getEmbedModel() { return embedModel; }
         public void setEmbedModel(String embedModel) { this.embedModel = embedModel; }
         public double getSemanticMinSimilarity() { return semanticMinSimilarity; }
