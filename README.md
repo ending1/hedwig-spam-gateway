@@ -126,6 +126,11 @@ curl -X DELETE http://localhost:8090/admin/spam-rules/42
 - 답할 수 있는 것: 기간별 처리 요약, 항목별 상위, 일자별 추이, 룰 조회, 룰 적중 현황, 검토 대기 신고. 룰/설정 변경 요청은 안내만 하고 바꾸지 않는다(다음 단계에서 "제안 후 관리자 확인"으로 확장 예정).
 - 설정: `gateway.chat.base-url`(환경변수 `GATEWAY_CHAT_BASEURL`), `gateway.chat.model`(`GATEWAY_CHAT_MODEL`). 소량 질문 20개 측정에서 의도 분류 정확도 qwen3-coder:30b 20/20, qwen2.5:14b 19/20, gemma:7b 10/20(CPU 서버 기준 평균 약 1초, 첫 호출은 모델 적재로 10초 이상).
 
+### 8-8. 환경관리 챗 (제안 후 관리자 확인)
+- AI 챗에서 룰 추가, 켜기/끄기, 가중치 변경을 말하면 챗봇은 **제안 카드**만 만든다. 관리자가 [적용]을 눌러야 반영되며, 제안은 10분 유효하고 1회용이며 만든 관리자 본인만 적용할 수 있다.
+- 적용 시점에 룰 상태를 다시 확인해 그 사이 바뀌었으면 거부하고, 패턴(정규식 컴파일, 정상 문장에 걸리는 범용 패턴 거부)과 가중치(0~10)를 서버가 다시 검증한다. 허용 동작은 네 가지뿐이다.
+- 모든 변경(챗 및 룰 화면/REST)은 `hw_admin_audit`에 누가·어디서·무엇을(전→후) 남기고 챗 탭에서 최근 이력을 본다. API: `POST /admin/chat/proposals/{id}/apply|cancel`, `GET /admin/audit`
+
 ### 문서
 - [인수인계](docs/HANDOVER.md) · [스팸 신고 API](docs/spam-report-api.md) · [소개/시연 PPT](docs/hedwig-spam-gateway-intro.pptx)
 
