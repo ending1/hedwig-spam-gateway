@@ -90,3 +90,9 @@ gateway:
 ## 8. 사용자와의 작업 방식
 - 사용자는 한국어로 소통. 외부 서비스에 키/데이터를 보내거나 운영 설정을 바꾸는 일은 사전 확인을 받는 편이 안전(과거 Gemini 실서버 활성화 때 확인을 거침).
 - 결과 보고는 간결하게, 확인한 것과 못 한 것을 구분해서 보고.
+
+## 이벤트 로그 / AI 챗 (2026-10-16 추가)
+- `hw_mail_event`(Oracle 생성 완료) + `MailEventService`가 메일 처리 결과를 기록. 보관 기간 `GATEWAY_EVENTLOG_RETENTIONDAYS`. 훅 위치: `InboundFilterFrontHandler`(블랙리스트 거부, 그레이리스팅 지연, 최종 판정), `RblCheckHandler`.
+- AI 챗은 `ChatService`(의도 분류만 LLM, 조회·답변은 고정 코드) + `OllamaIntentModel`. egov 설정 `gateway.chat.base-url: http://10.30.7.68:11434`(kube Ollama, 모델 `qwen3-coder:30b`). kube Ollama는 인증 없이 열려 있으므로 운영에서는 접속 주소를 제한할 것.
+- 다음 단계(미구현): 룰/설정 변경을 챗에서 "제안 → 관리자 확인 → 적용"으로, SPF/DKIM/DMARC 수신 검증, 메일 격리/원문 열람, kube에 `qwen3:30b` 등 추가 모델 설치 후 비교(다운로드는 사용자 승인 필요).
+- 알려진 한계: 룰 조회 키워드는 패턴·사유에 대한 단순 문자열 매칭이라 의미 검색이 아니다(예: "협박"으로 영문 패턴 룰은 못 찾음).

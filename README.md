@@ -116,6 +116,16 @@ curl -X DELETE http://localhost:8090/admin/spam-rules/42
 - 스키마는 `src/main/sql/{oracle,mariadb,mssql}/`, 접속 예시는 `deploy/conf/application-prod-oracle.example.yml`. 외부 DB에서는 `spring.sql.init.mode: never`.
 - 외부 DB를 쓰면 룰, 그레이리스트, 통계를 여러 인스턴스가 공유할 수 있다(H2 파일 모드는 단일 프로세스만).
 
+### 8-6. 메일 처리 이벤트 로그와 통계
+- 메일마다 처리 결과(정상/스팸/거부/지연), 걸린 필터(RBL/블랙·화이트리스트/그레이리스팅/룰/LLM), 발신 IP·발신자, 마스킹한 제목을 `hw_mail_event`에 비동기 일괄 저장한다(DB가 느려도 메일 처리에 영향 없음).
+- 보관 기간은 환경변수 `GATEWAY_EVENTLOG_RETENTIONDAYS`(기본 90일, 0이면 삭제 안 함). 대시보드 "통계·로그" 탭에서 기간별 요약, 일자별 추이, 항목별 상위, 로그 검색, 엑셀(CSV) 내려받기.
+- API: `/admin/stats/{summary,daily,top}`, `/admin/events`, `/admin/events/export.csv`
+
+### 8-7. 관리자 AI 챗 (읽기 전용)
+- 대시보드 "AI 챗" 탭. 로컬 LLM(Ollama, 기본 `qwen3-coder:30b`)이 질문의 **의도와 값만** JSON으로 뽑고, 조회와 답변은 서버의 고정 코드가 한다. 모델이 SQL이나 임의 동작을 만들 수 없고, 메일 내용이 모델에 다시 들어가지 않는다.
+- 답할 수 있는 것: 기간별 처리 요약, 항목별 상위, 일자별 추이, 룰 조회, 룰 적중 현황, 검토 대기 신고. 룰/설정 변경 요청은 안내만 하고 바꾸지 않는다(다음 단계에서 "제안 후 관리자 확인"으로 확장 예정).
+- 설정: `gateway.chat.base-url`(환경변수 `GATEWAY_CHAT_BASEURL`), `gateway.chat.model`(`GATEWAY_CHAT_MODEL`). 소량 질문 20개 측정에서 의도 분류 정확도 qwen3-coder:30b 20/20, qwen2.5:14b 19/20, gemma:7b 10/20(CPU 서버 기준 평균 약 1초, 첫 호출은 모델 적재로 10초 이상).
+
 ### 문서
 - [인수인계](docs/HANDOVER.md) · [스팸 신고 API](docs/spam-report-api.md) · [소개/시연 PPT](docs/hedwig-spam-gateway-intro.pptx)
 
