@@ -1,12 +1,15 @@
 package com.hs.mail.gateway.spamfilter.server;
 
 import com.hs.mail.gateway.config.GatewayProperties;
+import com.hs.mail.gateway.event.MailEvent;
+import com.hs.mail.gateway.event.MailEventService;
 import com.hs.mail.gateway.greylist.GreylistService;
 import com.hs.mail.gateway.greylist.GreylistVerdict;
 import com.hs.mail.gateway.maillist.MailListService;
 import com.hs.mail.gateway.maillist.MailListVerdict;
 import com.hs.mail.gateway.monitor.ConnectionStats;
 import com.hs.mail.gateway.monitor.SpamFilterStats;
+import com.hs.mail.gateway.spamfilter.RagText;
 import com.hs.mail.gateway.spamfilter.RuleBasedSpamChecker;
 import com.hs.mail.gateway.spamfilter.SpamCheckRequest;
 import com.hs.mail.gateway.spamfilter.SpamClassifier;
@@ -26,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.ArrayDeque;
+import java.util.Collections;
 import java.util.Deque;
 import java.util.List;
 import java.util.Locale;
@@ -55,6 +59,14 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
     private final GreylistService greylistService;
     private final MailListService mailListService;
     private final RuleBasedSpamChecker ruleBasedSpamChecker;
+
+    /** 통계/로그용 이벤트 기록기(선택). 없으면 기록하지 않는다. */
+    private MailEventService mailEvents;
+
+    public InboundFilterFrontHandler withMailEvents(MailEventService mailEvents) {
+        this.mailEvents = mailEvents;
+        return this;
+    }
 
     private final Deque<String> pending = new ArrayDeque<>();
     private final ProxySession session = new ProxySession();
@@ -173,6 +185,8 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
         if (listVerdict == MailListVerdict.BLACK
                 && properties.getMailList().getBlacklistAction() == GatewayProperties.BlacklistAction.REJECT) {
             log.info("블랙리스트 차단(REJECT): from={}, to={}", mailFrom, rcpt);
+            recordEvent(MailEvent.REJECTED, MailEvent.F_BLACKLIST, clientIp(ctx), mailFrom,
+                    Collections.singletonList(rcpt), "", 0, "발신자 블랙리스트");
             ctx.writeAndFlush("550 5.7.1 Blocked by sender blacklist\r\n");
             return;
         }
@@ -198,6 +212,8 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
                 ctx.channel().config().setAutoRead(true);
                 if (verdict == GreylistVerdict.DEFER) {
                     log.info("그레이리스팅 DEFER: ip={}, from={}, to={}", clientIp, mailFrom, rcpt);
+                    recordEvent(MailEvent.DEFERRED, MailEvent.F_GREYLIST, clientIp, mailFrom,
+                            Collections.singletonList(rcpt), "", 0, "그레이리스팅 최초 접촉");
                     ctx.writeAndFlush("450 4.2.1 Please try again later\r\n");
                 } else {
                     session.recipients.add(rcpt);
@@ -311,7 +327,60 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
         return out;
     }
 
+    /** 이벤트 로그 기록. 어떤 이유로든 실패해도 메일 처리에 영향을 주지 않는다. */
+    private void recordEvent(String action, String filter, String ip, String from, List<String> rcpts,
+                             String subject, double score, String reason) {
+        if (mailEvents == null || !mailEvents.isEnabled()) {
+            return;
+        }
+        try {
+            String fromAddr = from == null ? "" : from;
+            int at = fromAddr.lastIndexOf('@');
+            String fromDomain = at >= 0 ? fromAddr.substring(at + 1).toLowerCase(Locale.ROOT) : "";
+            String rcptDomain = "";
+            if (rcpts != null && !rcpts.isEmpty()) {
+                String first = rcpts.get(0);
+                int rat = first.lastIndexOf('@');
+                rcptDomain = rat >= 0 ? first.substring(rat + 1).toLowerCase(Locale.ROOT) : "";
+            }
+            mailEvents.record(new MailEvent(System.currentTimeMillis(), action, filter, ip,
+                    cut(fromAddr, 255), cut(fromDomain, 255), cut(rcptDomain, 255),
+                    rcpts == null ? 0 : rcpts.size(), cut(RagText.mask(subject), 200), score, cut(reason, 500)));
+        } catch (RuntimeException e) {
+            log.debug("이벤트 기록 실패(무시): {}", e.getMessage());
+        }
+    }
+
+    private static String cut(String s, int max) {
+        if (s == null) {
+            return "";
+        }
+        return s.length() > max ? s.substring(0, max) : s;
+    }
+
+    private static String filterOf(SpamVerdict verdict) {
+        String p = verdict.getProvider() == null ? "" : verdict.getProvider();
+        if ("rule-based".equals(p)) {
+            return MailEvent.F_RULE;
+        }
+        if ("mail-list".equals(p)) {
+            return MailEvent.F_BLACKLIST;
+        }
+        if ("mail-list-whitelist".equals(p)) {
+            return MailEvent.F_WHITELIST;
+        }
+        if ("none".equals(p) || p.isEmpty()) {
+            return MailEvent.F_NONE;
+        }
+        return MailEvent.F_LLM;
+    }
+
     private void deliverBufferedData(ChannelHandlerContext ctx, SpamVerdict verdict, List<String> bufferedLines) {
+        if (mailEvents != null && mailEvents.isEnabled()) {
+            String subject = SpamCheckRequest.from(session.mailFrom, session.recipients, bufferedLines, 1).getSubject();
+            recordEvent(verdict.isSpam() ? MailEvent.SPAM : MailEvent.HAM, filterOf(verdict), clientIp(ctx),
+                    session.mailFrom, session.recipients, subject, verdict.getScore(), verdict.getReason());
+        }
         if (verdict.isSpam()) {
             spamStats.recordSpam();
             log.info("스팸 판정: score={}, reason={}", verdict.getScore(), verdict.getReason());

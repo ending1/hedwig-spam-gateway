@@ -24,10 +24,17 @@ public class RblCheckHandler extends ChannelInboundHandlerAdapter {
     private final RblStats stats;
     private final ExecutorService executor;
 
+    private com.hs.mail.gateway.event.MailEventService mailEvents;
+
     public RblCheckHandler(RblChecker rblChecker, RblStats stats, ExecutorService executor) {
         this.rblChecker = rblChecker;
         this.stats = stats;
         this.executor = executor;
+    }
+
+    public RblCheckHandler withMailEvents(com.hs.mail.gateway.event.MailEventService mailEvents) {
+        this.mailEvents = mailEvents;
+        return this;
     }
 
     @Override
@@ -45,6 +52,11 @@ public class RblCheckHandler extends ChannelInboundHandlerAdapter {
             ctx.channel().eventLoop().execute(() -> {
                 if (finalListed) {
                     stats.recordBlocked();
+                    if (mailEvents != null) {
+                        mailEvents.record(new com.hs.mail.gateway.event.MailEvent(System.currentTimeMillis(),
+                                com.hs.mail.gateway.event.MailEvent.REJECTED, com.hs.mail.gateway.event.MailEvent.F_RBL,
+                                ip, "", "", "", 0, "", 0, "RBL 등재 IP"));
+                    }
                     log.info("RBL 등재 IP 연결 즉시 종료: ip={}", ip);
                     ctx.close();
                 } else {

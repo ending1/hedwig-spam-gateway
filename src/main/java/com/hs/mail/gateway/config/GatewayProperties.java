@@ -31,6 +31,7 @@ public class GatewayProperties {
     private final MailList mailList = new MailList();
     private final RuleFilter ruleFilter = new RuleFilter();
     private final Admin admin = new Admin();
+    private final EventLog eventLog = new EventLog();
     private final SpamReportOptions spamReport = new SpamReportOptions();
 
     public int getListenPort() {
@@ -111,6 +112,30 @@ public class GatewayProperties {
 
     public Admin getAdmin() {
         return admin;
+    }
+
+    public EventLog getEventLog() {
+        return eventLog;
+    }
+
+    /**
+     * 메일 처리 이벤트 로그(통계/로그 검색/챗봇 질의의 원천 데이터). 보관 기간은 환경변수
+     * {@code GATEWAY_EVENTLOG_RETENTIONDAYS}(또는 gateway.event-log.retention-days)로 지정한다. 0이면 삭제하지 않는다.
+     */
+    public static class EventLog {
+        private boolean enabled = true;
+        private int retentionDays = 90;
+        private int flushSeconds = 5;
+        private int maxQueue = 20000;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public int getRetentionDays() { return retentionDays; }
+        public void setRetentionDays(int retentionDays) { this.retentionDays = retentionDays; }
+        public int getFlushSeconds() { return flushSeconds; }
+        public void setFlushSeconds(int flushSeconds) { this.flushSeconds = flushSeconds; }
+        public int getMaxQueue() { return maxQueue; }
+        public void setMaxQueue(int maxQueue) { this.maxQueue = maxQueue; }
     }
 
     public SpamReportOptions getSpamReport() {

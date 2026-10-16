@@ -68,3 +68,20 @@ CREATE TABLE IF NOT EXISTS hw_spam_report (
     rag_added BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS hw_mail_event (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    event_at TIMESTAMP NOT NULL,
+    event_day VARCHAR(10) NOT NULL,
+    action VARCHAR(12) NOT NULL,
+    filter_name VARCHAR(12) NOT NULL,
+    client_ip VARCHAR(45),
+    from_addr VARCHAR(255),
+    from_domain VARCHAR(255),
+    rcpt_domain VARCHAR(255),
+    rcpt_count INT DEFAULT 0,
+    subject VARCHAR(200),
+    score DOUBLE DEFAULT 0,
+    reason VARCHAR(500)
+);
+CREATE INDEX IF NOT EXISTS idx_hw_mail_event_day ON hw_mail_event (event_day, action);

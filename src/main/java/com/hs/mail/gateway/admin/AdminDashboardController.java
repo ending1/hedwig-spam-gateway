@@ -68,6 +68,7 @@ public class AdminDashboardController {
                 "<nav class=\"tabs\" id=\"tabs\">\n" +
                 "  <button class=\"tab\" data-tab=\"rules\">룰 관리</button>\n" +
                 "  <button class=\"tab\" data-tab=\"reports\">스팸 신고<span class=\"badge\" id=\"badgeReports\"></span></button>\n" +
+                "  <button class=\"tab\" data-tab=\"events\">통계·로그</button>\n" +
                 "  <button class=\"tab\" data-tab=\"lists\">화이트/블랙리스트</button>\n" +
                 "</nav>\n" +
                 "<section class=\"tab-panel\" id=\"tab-lists\">\n" +
@@ -121,6 +122,29 @@ public class AdminDashboardController {
                 "    <thead><tr><th>ID</th><th>신고자</th><th>발신 도메인</th><th>제목 / 본문 일부</th><th>LLM 판정</th><th>의견</th><th>제안 룰</th><th>상태</th><th>RAG</th><th></th></tr></thead>\n" +
                 "    <tbody></tbody>\n" +
                 "  </table>\n" +
+                "</section>\n" +
+                "<section class=\"tab-panel\" id=\"tab-events\">\n" +
+                "  <h2>메일 처리 통계·로그</h2>\n" +
+                "  <form id=\"evForm\" onsubmit=\"return false\">\n" +
+                "    기간 <select id=\"evPeriod\"><option value=\"today\">오늘</option><option value=\"yesterday\">어제</option><option value=\"last7d\" selected>최근 7일</option><option value=\"last30d\">최근 30일</option><option value=\"thisweek\">이번 주</option><option value=\"thismonth\">이번 달</option><option value=\"custom\">직접 입력</option></select>\n" +
+                "    <input type=\"date\" id=\"evFrom\"> ~ <input type=\"date\" id=\"evTo\">\n" +
+                "    <button id=\"evReload\">조회</button>\n" +
+                "  </form>\n" +
+                "  <div class=\"cards\" id=\"evCards\"></div>\n" +
+                "  <h3>일자별 추이</h3>\n" +
+                "  <table id=\"evDaily\"><thead><tr><th>일자</th><th>정상</th><th>스팸</th><th>거부</th><th>지연</th><th>스팸 비율</th></tr></thead><tbody></tbody></table>\n" +
+                "  <h3>항목별 상위\n" +
+                "    <select id=\"evDim\"><option value=\"domain\">발신 도메인</option><option value=\"ip\">발신 IP</option><option value=\"sender\">발신자</option><option value=\"filter\">걸린 필터</option><option value=\"recipient_domain\">수신 도메인</option></select>\n" +
+                "    <select id=\"evTopAction\"><option value=\"SPAM\">스팸</option><option value=\"REJECTED\">거부</option><option value=\"DEFERRED\">지연</option><option value=\"HAM\">정상</option><option value=\"ALL\">전체</option></select></h3>\n" +
+                "  <table id=\"evTop\"><thead><tr><th>항목</th><th>건수</th></tr></thead><tbody></tbody></table>\n" +
+                "  <h3>처리 로그 <small style=\"font-weight:normal;color:#666\">(최근 200건)</small></h3>\n" +
+                "  <form id=\"evSearch\" onsubmit=\"return false\">\n" +
+                "    <select id=\"evAction\"><option value=\"ALL\">처리 전체</option><option value=\"HAM\">정상</option><option value=\"SPAM\">스팸</option><option value=\"REJECTED\">거부</option><option value=\"DEFERRED\">지연</option></select>\n" +
+                "    <select id=\"evFilter\"><option value=\"ALL\">필터 전체</option><option>RBL</option><option>BLACKLIST</option><option>WHITELIST</option><option>GREYLIST</option><option>RULE</option><option>LLM</option><option>NONE</option></select>\n" +
+                "    <input id=\"evIp\" placeholder=\"발신 IP\" size=\"14\"> <input id=\"evSender\" placeholder=\"발신자 일부\" size=\"18\">\n" +
+                "    <button id=\"evFind\">검색</button> <button id=\"evCsv\" style=\"background:#16a34a\">엑셀(CSV) 내려받기</button>\n" +
+                "  </form>\n" +
+                "  <table id=\"evLog\"><thead><tr><th>시각</th><th>처리</th><th>필터</th><th>IP</th><th>발신자</th><th>수신 도메인</th><th>제목</th><th>점수</th><th>사유</th></tr></thead><tbody></tbody></table>\n" +
                 "</section>\n" +
                 "<script>\n" +
                 "const KEY_STORE = 'hedwigAdminKey';\n" +
@@ -238,6 +262,65 @@ public class AdminDashboardController {
                 "function encodeAttr(s) { return (s == null ? '' : s).replace(/'/g, \"\\\\'\"); }\n" +
                 "let ruleById = {};\n" +
                 "const TAB_STORE = 'hedwigDashTab';\n" +
+                "const EV_LABEL = { HAM: '정상', SPAM: '스팸', REJECTED: '거부', DEFERRED: '지연' };\n" +
+                "function evRange() {\n" +
+                "  const per = document.getElementById('evPeriod').value;\n" +
+                "  if (per === 'custom') {\n" +
+                "    const f = document.getElementById('evFrom').value, t = document.getElementById('evTo').value;\n" +
+                "    return f && t ? 'from=' + f + '&to=' + t : 'period=last7d';\n" +
+                "  }\n" +
+                "  return 'period=' + per;\n" +
+                "}\n" +
+                "async function loadEventStats() {\n" +
+                "  const r = evRange();\n" +
+                "  const sr = await adminFetch('/admin/stats/summary?' + r);\n" +
+                "  if (!sr.ok) return;\n" +
+                "  const s = await sr.json();\n" +
+                "  document.getElementById('evCards').innerHTML = s.enabled\n" +
+                "    ? [['전체', s.total], ['정상', s.HAM], ['스팸', s.SPAM], ['거부', s.REJECTED], ['지연', s.DEFERRED]].map(c => '<div class=\"card\"><h3>' + c[0] + '</h3><div class=\"value\">' + c[1] + '</div></div>').join('') + '<div class=\"card\"><h3>기간</h3><div>' + s.from + ' ~ ' + s.to + '</div></div>'\n" +
+                "    : '<div class=\"card\">이벤트 로그가 꺼져 있습니다(gateway.event-log.enabled)</div>';\n" +
+                "  const dr = await adminFetch('/admin/stats/daily?' + r);\n" +
+                "  if (dr.ok) {\n" +
+                "    const rows = await dr.json();\n" +
+                "    document.querySelector('#evDaily tbody').innerHTML = rows.map(x => {\n" +
+                "      const tot = x.HAM + x.SPAM + x.REJECTED + x.DEFERRED; const pct = tot ? Math.round(100 * x.SPAM / tot) : 0;\n" +
+                "      return '<tr><td>' + x.day + '</td><td>' + x.HAM + '</td><td>' + x.SPAM + '</td><td>' + x.REJECTED + '</td><td>' + x.DEFERRED + '</td><td><div style=\"background:#e5e7eb;border-radius:4px;width:160px\"><div style=\"background:#dc2626;height:10px;border-radius:4px;width:' + (pct * 1.6) + 'px\"></div></div> ' + pct + '%</td></tr>';\n" +
+                "    }).join('') || '<tr><td colspan=\"6\">데이터 없음</td></tr>';\n" +
+                "  }\n" +
+                "  loadEventTop(); loadEventLog();\n" +
+                "}\n" +
+                "async function loadEventTop() {\n" +
+                "  const dim = document.getElementById('evDim').value, act = document.getElementById('evTopAction').value;\n" +
+                "  const res = await adminFetch('/admin/stats/top?' + evRange() + '&dimension=' + dim + '&action=' + act + '&limit=10');\n" +
+                "  if (!res.ok) return;\n" +
+                "  const rows = await res.json();\n" +
+                "  document.querySelector('#evTop tbody').innerHTML = rows.map(x => '<tr><td>' + escapeHtml(x.key) + '</td><td>' + x.count + '</td></tr>').join('') || '<tr><td colspan=\"2\">데이터 없음</td></tr>';\n" +
+                "}\n" +
+                "function evLogQuery() {\n" +
+                "  const q = evRange() + '&action=' + document.getElementById('evAction').value + '&filter=' + document.getElementById('evFilter').value;\n" +
+                "  const ip = document.getElementById('evIp').value.trim(), sd = document.getElementById('evSender').value.trim();\n" +
+                "  return q + (ip ? '&ip=' + encodeURIComponent(ip) : '') + (sd ? '&sender=' + encodeURIComponent(sd) : '');\n" +
+                "}\n" +
+                "async function loadEventLog() {\n" +
+                "  const res = await adminFetch('/admin/events?' + evLogQuery() + '&limit=200');\n" +
+                "  if (!res.ok) return;\n" +
+                "  const rows = await res.json();\n" +
+                "  document.querySelector('#evLog tbody').innerHTML = rows.map(x => '<tr><td>' + x.at + '</td><td>' + (EV_LABEL[x.action] || x.action) + '</td><td>' + x.filter + '</td><td>' + escapeHtml(x.ip) + '</td><td>' + escapeHtml(x.from) + '</td><td>' + escapeHtml(x.rcptDomain) + '</td><td>' + escapeHtml(x.subject) + '</td><td>' + x.score + '</td><td>' + escapeHtml(x.reason) + '</td></tr>').join('') || '<tr><td colspan=\"9\">데이터 없음</td></tr>';\n" +
+                "}\n" +
+                "document.getElementById('evReload').addEventListener('click', loadEventStats);\n" +
+                "document.getElementById('evPeriod').addEventListener('change', loadEventStats);\n" +
+                "document.getElementById('evDim').addEventListener('change', loadEventTop);\n" +
+                "document.getElementById('evTopAction').addEventListener('change', loadEventTop);\n" +
+                "document.getElementById('evFind').addEventListener('click', loadEventLog);\n" +
+                "document.getElementById('evCsv').addEventListener('click', async () => {\n" +
+                "  const res = await adminFetch('/admin/events/export.csv?' + evLogQuery());\n" +
+                "  if (!res.ok) { alert('내려받지 못했습니다'); return; }\n" +
+                "  const blob = await res.blob(); const a = document.createElement('a');\n" +
+                "  a.href = URL.createObjectURL(blob); a.download = 'mail-events.csv'; document.body.appendChild(a); a.click(); a.remove();\n" +
+                "});\n" +
+                "document.getElementById('tabs').addEventListener('click', (e) => {\n" +
+                "  const b = e.target.closest('.tab'); if (b && b.dataset.tab === 'events') loadEventStats();\n" +
+                "});\n" +
                 "function showTab(name) {\n" +
                 "  if (!document.getElementById('tab-' + name)) name = 'rules';\n" +
                 "  document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));\n" +
@@ -406,7 +489,7 @@ public class AdminDashboardController {
                 "let savedTab = 'rules'; try { savedTab = sessionStorage.getItem(TAB_STORE) || 'rules'; } catch (e) {}\n" +
                 "showTab(savedTab);\n" +
                 "loadStats();\n" +
-                "initAuth().then((ok) => { if (ok) { loadList(); loadRules(); loadReports(); } });\n" +
+                "initAuth().then((ok) => { if (ok) { loadList(); loadRules(); loadReports(); if (savedTab === 'events') loadEventStats(); } });\n" +
                 "setInterval(loadStats, 5000);\n" +
                 "</script>\n" +
                 "</body>\n" +

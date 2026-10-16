@@ -50,6 +50,13 @@ public class GatewayChannelInitializer extends ChannelInitializer<SocketChannel>
     private final RblCheckExecutor rblCheckExecutor;
     private final MailListService mailListService;
     private final RuleBasedSpamChecker ruleBasedSpamChecker;
+    /** 통계/로그용 이벤트 기록기(선택). 테스트처럼 스프링 밖에서 만들면 null이라 기록하지 않는다. */
+    private com.hs.mail.gateway.event.MailEventService mailEvents;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setMailEvents(com.hs.mail.gateway.event.MailEventService mailEvents) {
+        this.mailEvents = mailEvents;
+    }
 
     public GatewayChannelInitializer(GatewayProperties properties,
                                       BanListService banListService,
@@ -84,7 +91,7 @@ public class GatewayChannelInitializer extends ChannelInitializer<SocketChannel>
                 .addLast("idleTimeout", new IdleStateHandler(0, 0, 60, TimeUnit.SECONDS))
                 .addLast("rateLimit", new RateLimitHandler(counter, banListService, properties))
                 .addLast("banCheck", new BanCheckHandler(banListService))
-                .addLast("rblCheck", new RblCheckHandler(rblChecker, rblStats, rblCheckExecutor.get()));
+                .addLast("rblCheck", new RblCheckHandler(rblChecker, rblStats, rblCheckExecutor.get()).withMailEvents(mailEvents));
 
         boolean needsProxy = properties.getSpamFilter().isEnabled()
                 || properties.getGreylist().isEnabled()
@@ -98,7 +105,7 @@ public class GatewayChannelInitializer extends ChannelInitializer<SocketChannel>
                     .addLast("stringEncoder", new StringEncoder())
                     .addLast("spamFilterProxy", new InboundFilterFrontHandler(properties, spamClassifier,
                             spamFilterStats, connectionStats, spamClassifierExecutor.get(), greylistService,
-                            mailListService, ruleBasedSpamChecker));
+                            mailListService, ruleBasedSpamChecker).withMailEvents(mailEvents));
         } else {
             ch.pipeline().addLast("relay", new RelayHandler(properties, connectionStats));
         }
