@@ -21,6 +21,7 @@ import org.springframework.jdbc.datasource.init.ResourceDatabasePopulator;
 import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -39,6 +40,23 @@ class ChatServiceTest {
     private String modelAnswer;
     private boolean modelDown;
     private String lastUserText;
+
+    /** 키워드 표로 만든 가짜 임베딩: "당첨"이 들어 있으면 [1,0], "송금"이면 [0,1], 그 밖은 거의 0. embedFails면 예외. */
+    private boolean embedFails;
+    private int embedCalls;
+    private final TextEmbedder fakeEmbedder = texts -> {
+        embedCalls++;
+        if (embedFails) {
+            throw new java.io.IOException("embed down");
+        }
+        List<float[]> out = new java.util.ArrayList<>();
+        for (String t : texts) {
+            if (t.contains("당첨") || t.contains("복권")) out.add(new float[] {1f, 0f, 0f});
+            else if (t.contains("송금") || t.contains("wire")) out.add(new float[] {0f, 1f, 0f});
+            else out.add(new float[] {0f, 0f, 1f});
+        }
+        return out;
+    };
 
     private final IntentModel fake = (system, user) -> {
         lastUserText = user;
@@ -68,7 +86,8 @@ class ChatServiceTest {
         audit = new com.hs.mail.gateway.audit.AuditService(jdbc, sql);
         changes = new ChangeService(rules, audit);
         quarantine = org.mockito.Mockito.mock(com.hs.mail.gateway.quarantine.QuarantineService.class);
-        return new ChatService(fake, events, rules, ruleStats, reports, changes, quarantine, props);
+        return new ChatService(fake, events, rules, ruleStats, reports, changes, quarantine,
+                new RuleSemanticSearch(fakeEmbedder, rules, props), props);
     }
 
     private ChatService.Reply ask(ChatService c, String q) throws Exception {
@@ -236,6 +255,101 @@ class ChatServiceTest {
         ChatService.Reply r = ask(c, "보류된 메일 있어?");
         assertTrue(r.answer.contains("보류 중인 메일은 없습니다"), r.answer);
         assertTrue(r.answer.contains("보류 기능은 꺼져 있어"), r.answer);
+    }
+
+    @Test
+    void 질문_속_날짜_표현은_모델이_아니라_서버가_해석한다() throws Exception {
+        ChatService c = chat("chat10");
+        LocalDate today = LocalDate.now();
+        // 모델이 period를 엉뚱하게 줘도(또는 from/to를 틀리게 줘도) 질문의 날짜 표현이 우선한다
+        modelAnswer = "{\"intent\":\"STATS_SUMMARY\",\"params\":{\"period\":\"last30d\",\"from\":\"2000-01-01\",\"to\":\"2000-01-02\"}}";
+        ChatService.Reply r = ask(c, "어제 스팸 몇 건이야?");
+        assertEquals("yesterday", r.params.get("period"));
+        assertEquals(today.minusDays(1).toString(), r.params.get("from"));
+
+        LocalDate d5 = today.minusDays(6), d7 = today.minusDays(4);
+        String q = d5.getMonthValue() + "월 " + d5.getDayOfMonth() + "일부터 " + d7.getDayOfMonth() + "일까지 스팸 몇 건이야?";
+        if (d5.getMonthValue() != d7.getMonthValue()) {
+            q = d5.getMonthValue() + "월 " + d5.getDayOfMonth() + "일부터 " + d7.getMonthValue() + "월 " + d7.getDayOfMonth() + "일까지 스팸 몇 건이야?";
+        }
+        ChatService.Reply range = ask(c, q);
+        assertEquals("custom", range.params.get("period"));
+        assertEquals(d5.toString(), range.params.get("from"));
+        assertEquals(d7.toString(), range.params.get("to"));
+
+        // 질문에 날짜 표현이 없으면 모델이 준 from/to를 검증해 쓴다
+        modelAnswer = "{\"intent\":\"STATS_SUMMARY\",\"params\":{\"from\":\"" + today.minusDays(3) + "\",\"to\":\"" + today.minusDays(1) + "\"}}";
+        ChatService.Reply viaModel = ask(c, "그 사이 스팸 요약");
+        assertEquals(today.minusDays(3).toString(), viaModel.params.get("from"));
+
+        // 모델이 잘못된 날짜를 주면 무시하고 기본 기간
+        modelAnswer = "{\"intent\":\"STATS_SUMMARY\",\"params\":{\"from\":\"13월 40일\",\"to\":\"x\"}}";
+        assertEquals("last7d", ask(c, "스팸 요약").params.get("period"));
+    }
+
+    @Test
+    void 이벤트_검색은_발신자_IP_처리별로_판정_사유를_보여_주고_입력을_정제한다() throws Exception {
+        ChatService c = chat("chat11");
+        events.record(new MailEvent(at(1), MailEvent.SPAM, MailEvent.F_RULE, "203.0.113.9", "spam@bad.example", "bad.example",
+                "corp.example", 1, "무료 상품권", 6, "keyword:당첨금"));
+        events.record(new MailEvent(at(2), MailEvent.HAM, MailEvent.F_NONE, "198.51.100.2", "boss@ok.example", "ok.example",
+                "corp.example", 1, "회의", 0, ""));
+        modelAnswer = "{\"intent\":\"EVENT_SEARCH\",\"params\":{\"sender\":\"bad.example\",\"action\":\"ALL\",\"limit\":5}}";
+
+        ChatService.Reply r = ask(c, "bad.example 메일 어떻게 처리됐어?");
+
+        assertEquals("EVENT_SEARCH", r.intent);
+        assertEquals(1, r.rows.size());
+        assertEquals("spam@bad.example", r.rows.get(0).get(3));
+        assertTrue(String.valueOf(r.rows.get(0).get(6)).contains("keyword:당첨금"), "판정 사유가 보인다");
+        assertTrue(r.answer.contains("bad.example"), r.answer);
+
+        modelAnswer = "{\"intent\":\"EVENT_SEARCH\",\"params\":{\"ip\":\"198.51.100.2\",\"limit\":50}}";
+        ChatService.Reply byIp = ask(c, "198.51.100.2에서 온 메일");
+        assertEquals(1, byIp.rows.size());
+        assertEquals(10, byIp.params.get("limit"), "개수는 10건으로 제한");
+
+        // 위험한 값은 정제된다: 와일드카드/따옴표 제거, 이상한 IP/처리 구분은 기본값
+        modelAnswer = "{\"intent\":\"EVENT_SEARCH\",\"params\":{\"sender\":\"%' OR 1=1 --\",\"ip\":\"1.1.1.1; DROP\",\"action\":\"EVERYTHING\"}}";
+        ChatService.Reply bad = ask(c, "이상한 입력");
+        assertEquals("OR11--".replace("--", "--"), String.valueOf(bad.params.get("sender")).replace("%", ""), "특수문자 제거");
+        assertEquals("", bad.params.get("ip"));
+        assertEquals("ALL", bad.params.get("action"));
+        assertEquals(2, events.search("2000-01-01", "2999-12-31", "ALL", "ALL", "ALL", "ALL", 50).size(), "데이터는 그대로");
+
+        modelAnswer = "{\"intent\":\"EVENT_SEARCH\",\"params\":{\"sender\":\"nobody@none.example\"}}";
+        assertTrue(ask(c, "없는 발신자").answer.contains("기록이 없습니다"));
+    }
+
+    @Test
+    void 룰_조회는_문자열이_안_맞아도_의미가_비슷한_룰을_유사도와_함께_찾고_실패하면_문자열_일치로_대체한다() throws Exception {
+        ChatService c = chat("chat12");
+        props.getChat().setBaseUrl("http://embed.test:11434");
+        modelAnswer = "{\"intent\":\"RULE_LIST\",\"params\":{\"keyword\":\"복권\"}}";
+
+        ChatService.Reply r = ask(c, "복권 관련 룰 알려줘");
+
+        assertTrue(r.answer.contains("의미가 비슷한 룰"), r.answer);
+        assertEquals("유사도", r.columns.get(5));
+        assertTrue(r.rows.size() >= 1, "당첨 관련 기본 룰이 의미로 찾아진다");
+        for (List<Object> row : r.rows) {
+            assertTrue(String.valueOf(row.get(2)).contains("당첨") || String.valueOf(row.get(2)).contains("won"), "당첨 룰만: " + row);
+            assertEquals("1.00", row.get(5));
+        }
+        int callsAfterFirst = embedCalls;
+        ask(c, "복권 관련 룰 알려줘");
+        assertEquals(callsAfterFirst + 1, embedCalls, "룰이 안 바뀌면 색인은 다시 만들지 않고 질의만 임베딩한다");
+
+        embedFails = true;
+        ChatService.Reply fallback = ask(c, "복권 관련 룰 알려줘");
+        assertTrue(fallback.answer.contains("찾지 못했습니다") && fallback.answer.contains("의미 검색을 쓸 수 없어"), fallback.answer);
+        embedFails = false;
+
+        // 임베딩 설정이 없으면(base-url 비움) 의미 검색을 시도하지 않는다
+        props.getChat().setBaseUrl("");
+        int before = embedCalls;
+        ask(c, "복권 관련 룰 알려줘");
+        assertEquals(before, embedCalls);
     }
 
     @Test

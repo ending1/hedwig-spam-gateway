@@ -267,6 +267,15 @@ public class GatewayProperties {
         private String model = "qwen3-coder:30b";
         private int timeoutMillis = 60000;
         private String keepAlive = "30m";
+        /** 룰 의미 검색용 임베딩 모델(같은 Ollama 서버). 비우면 의미 검색을 끄고 문자열 일치만 쓴다. */
+        private String embedModel = "bge-m3";
+        /** 의미 검색에서 이 값 미만으로 비슷한 룰은 결과에 넣지 않는다(코사인 유사도). */
+        private double semanticMinSimilarity = 0.55;
+
+        public String getEmbedModel() { return embedModel; }
+        public void setEmbedModel(String embedModel) { this.embedModel = embedModel; }
+        public double getSemanticMinSimilarity() { return semanticMinSimilarity; }
+        public void setSemanticMinSimilarity(double semanticMinSimilarity) { this.semanticMinSimilarity = semanticMinSimilarity; }
 
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }

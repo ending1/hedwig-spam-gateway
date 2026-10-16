@@ -20,6 +20,23 @@ public final class StatsPeriod {
         this.toDay = to.format(DAY);
     }
 
+    /** 날짜 범위 직접 지정(시작이 끝보다 늦으면 바꾸고, 끝이 today를 넘으면 today로 자른다). */
+    public static StatsPeriod ofDates(LocalDate from, LocalDate to, LocalDate today) {
+        LocalDate f = from, t = to;
+        if (f.isAfter(t)) {
+            LocalDate x = f;
+            f = t;
+            t = x;
+        }
+        if (t.isAfter(today)) {
+            t = today;
+        }
+        if (f.isAfter(t)) {
+            f = t;
+        }
+        return new StatsPeriod(f, t);
+    }
+
     public static boolean isDate(String s) {
         if (s == null || !DATE.matcher(s).matches()) {
             return false;
@@ -48,6 +65,14 @@ public final class StatsPeriod {
                 return new StatsPeriod(today.minusDays(29), today);
             case "thisweek":
                 return new StatsPeriod(today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)), today);
+            case "lastweek": {
+                LocalDate mon = today.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)).minusWeeks(1);
+                return new StatsPeriod(mon, mon.plusDays(6));
+            }
+            case "lastmonth": {
+                LocalDate first = today.withDayOfMonth(1).minusMonths(1);
+                return new StatsPeriod(first, first.withDayOfMonth(first.lengthOfMonth()));
+            }
             case "thismonth":
                 return new StatsPeriod(today.withDayOfMonth(1), today);
             default:

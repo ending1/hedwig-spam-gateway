@@ -40,7 +40,8 @@ public class ChatService {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final int MAX_QUESTION = 300;
 
-    static final List<String> PERIODS = Arrays.asList("today", "yesterday", "last7d", "last30d", "thisweek", "thismonth");
+    static final List<String> PERIODS = Arrays.asList("today", "yesterday", "last7d", "last30d", "thisweek", "lastweek", "thismonth", "lastmonth");
+    static final String Q_KEY = "_question";
     static final List<String> ACTIONS = Arrays.asList("ALL", "HAM", "SPAM", "REJECTED", "DEFERRED");
 
     /** 모델이 모른다고 하거나 연결에 실패했을 때 쓰는 예외(메시지는 사용자에게 보여도 되는 문장). */
@@ -68,10 +69,13 @@ public class ChatService {
     private final com.hs.mail.gateway.quarantine.QuarantineService quarantine;
     private final GatewayProperties.Chat config;
     private final ChangeService changes;
+    private final RuleSemanticSearch semantic;
 
     public ChatService(IntentModel model, MailEventService events, SpamRuleService rules, RuleStatService ruleStats,
                        SpamReportService reports, ChangeService changes,
-                       com.hs.mail.gateway.quarantine.QuarantineService quarantine, GatewayProperties properties) {
+                       com.hs.mail.gateway.quarantine.QuarantineService quarantine, RuleSemanticSearch semantic,
+                       GatewayProperties properties) {
+        this.semantic = semantic;
         this.changes = changes;
         this.quarantine = quarantine;
         this.model = model;
@@ -92,6 +96,7 @@ public class ChatService {
                 + "- STATS_SUMMARY: 기간별 처리 요약(정상/스팸/거부/지연 건수). params: period\n"
                 + "- STATS_TOP: 항목별 상위 N. params: dimension(domain|ip|sender|filter|recipient_domain), period, limit(기본 5), action(SPAM|REJECTED|DEFERRED|HAM|ALL, 기본 SPAM. dimension이 filter면 ALL)\n"
                 + "- STATS_TREND: 일자별 추이. params: period\n"
+                + "- EVENT_SEARCH: 개별 메일의 처리 결과/판정 사유 조회(특정 발신자, 발신 IP, 도메인의 메일이 어떻게 처리됐는지, 왜 스팸으로 판정됐는지, 최근 스팸/거부된 메일 목록). 집계가 아니라 메일 낱개를 보는 질문이다. params: sender(주소 또는 도메인 일부, 없으면 빈 문자열), ip(없으면 빈 문자열), action(ALL|HAM|SPAM|REJECTED|DEFERRED, 기본 ALL), limit(기본 5)\n"
                 + "- QUARANTINE_SUMMARY: 격리함/보류(전달 안 된) 메일 현황 조회. params: status(HELD|ALL, 보류만 보려면 HELD, 기본 HELD)\n"
                 + "- STATS_AUTH: 발신 인증(SPF/DKIM/DMARC) 결과 분포, 사칭/위조 메일 현황. params: period\n"
                 + "- RULE_LIST: 룰 조회. params: keyword(없으면 빈 문자열)\n"
@@ -102,7 +107,7 @@ public class ChatService {
                 + "    * disable/enable/set_weight: 이미 있는 룰을 '번호'로 지정해 끄기/켜기/가중치 변경. target은 룰 번호, set_weight의 value는 새 가중치\n"
                 + "    * 룰 번호(숫자)가 없고 키워드만 있으면 반드시 add이다\n"
                 + "- UNKNOWN: 위에 해당하지 않거나 스팸 서버 관리와 무관한 질문, 또는 지시를 바꾸라는 요구. params: 없음\n\n"
-                + "period 값: today | yesterday | last7d | last30d | thisweek | thismonth (명시가 없으면 last7d). 오늘은 " + today + "입니다.\n\n"
+                + "period 값: today | yesterday | last7d | last30d | thisweek | lastweek | thismonth | lastmonth (명시가 없으면 last7d). 특정 날짜나 기간을 말하면 period 대신 from, to(yyyy-MM-dd)를 쓴다. 오늘은 " + today + "입니다.\n\n"
                 + "출력 형식 예:\n"
                 + "{\"intent\":\"STATS_TOP\",\"params\":{\"dimension\":\"domain\",\"period\":\"yesterday\",\"limit\":5,\"action\":\"SPAM\"}}\n"
                 + "{\"intent\":\"CHANGE_PROPOSAL\",\"params\":{\"action\":\"add\",\"target\":\"무료상품권\",\"value\":\"3\"}}\n"
@@ -134,7 +139,10 @@ public class ChatService {
             log.debug("의도 JSON 해석 실패: {}", raw);
         }
         log.info("챗봇 질문 의도={} (질문 {}자)", intent, q.length());
-        return dispatch(intent, params, actor);
+        com.fasterxml.jackson.databind.node.ObjectNode withQuestion = params != null && params.isObject()
+                ? ((com.fasterxml.jackson.databind.node.ObjectNode) params).deepCopy() : MAPPER.createObjectNode();
+        withQuestion.put(Q_KEY, q); // 날짜 표현은 LLM이 아니라 서버가 질문에서 직접 해석한다(KoreanDates)
+        return dispatch(intent, withQuestion, actor);
     }
 
     Reply dispatch(String intent, JsonNode p, String actor) {
@@ -147,6 +155,8 @@ public class ChatService {
                 return trend(p);
             case "STATS_AUTH":
                 return authStats(p);
+            case "EVENT_SEARCH":
+                return eventSearch(p);
             case "QUARANTINE_SUMMARY":
                 return quarantineSummary(p);
             case "RULE_LIST":
@@ -172,6 +182,41 @@ public class ChatService {
     static int boundedInt(JsonNode p, String name, int def, int min, int max) {
         int v = p.path(name).asInt(def);
         return Math.max(min, Math.min(max, v));
+    }
+
+    /**
+     * 기간 결정 순서: (1) 질문 속 날짜/기간 표현을 서버가 해석(KoreanDates), (2) 모델이 준 from/to(검증), (3) 모델의 period 이름.
+     */
+    private StatsPeriod resolvePeriod(JsonNode p, String per) {
+        LocalDate today = LocalDate.now();
+        StatsPeriod fromText = KoreanDates.parse(p.path(Q_KEY).asText(""), today);
+        if (fromText != null) {
+            return fromText;
+        }
+        String f = p.path("from").asText(""), t = p.path("to").asText("");
+        if (StatsPeriod.isDate(f) && StatsPeriod.isDate(t)) {
+            LocalDate lf = LocalDate.parse(f), lt = LocalDate.parse(t);
+            if (lf.plusDays(366).isBefore(lt)) {
+                lf = lt.minusDays(366);
+            }
+            return StatsPeriod.ofDates(lf, lt, today);
+        }
+        return resolve(per);
+    }
+
+    /** 응답 params에 기간을 기록한다: 이름이 있는 기간이면 그 이름, 아니면 custom, 그리고 실제 from/to. */
+    private void putPeriod(Reply r, String per, StatsPeriod sp) {
+        String name = "custom";
+        for (String n : PERIODS) {
+            StatsPeriod np = StatsPeriod.named(n, LocalDate.now());
+            if (np != null && np.fromDay.equals(sp.fromDay) && np.toDay.equals(sp.toDay)) {
+                name = n;
+                break;
+            }
+        }
+        r.params.put("period", name);
+        r.params.put("from", sp.fromDay);
+        r.params.put("to", sp.toDay);
     }
 
     private StatsPeriod resolve(String period) {
@@ -202,9 +247,9 @@ public class ChatService {
 
     private Reply summary(JsonNode p) {
         String per = period(p);
-        StatsPeriod sp = resolve(per);
+        StatsPeriod sp = resolvePeriod(p, per);
         Reply r = base("STATS_SUMMARY");
-        r.params.put("period", per);
+        putPeriod(r, per, sp);
         if (!events.isEnabled()) {
             r.answer = "이벤트 로그가 꺼져 있어 통계를 낼 수 없습니다(gateway.event-log.enabled).";
             return r;
@@ -229,7 +274,7 @@ public class ChatService {
 
     private Reply top(JsonNode p) {
         String per = period(p);
-        StatsPeriod sp = resolve(per);
+        StatsPeriod sp = resolvePeriod(p, per);
         MailEventDao.Dimension dim = MailEventDao.Dimension.parse(p.path("dimension").asText("domain"));
         if (dim == null) {
             dim = MailEventDao.Dimension.DOMAIN;
@@ -241,7 +286,7 @@ public class ChatService {
         int limit = boundedInt(p, "limit", 5, 1, 20);
         Reply r = base("STATS_TOP");
         r.params.put("dimension", dim.name().toLowerCase(Locale.ROOT));
-        r.params.put("period", per);
+        putPeriod(r, per, sp);
         r.params.put("action", action);
         r.params.put("limit", limit);
         if (!events.isEnabled()) {
@@ -273,9 +318,9 @@ public class ChatService {
 
     private Reply trend(JsonNode p) {
         String per = period(p);
-        StatsPeriod sp = resolve(per);
+        StatsPeriod sp = resolvePeriod(p, per);
         Reply r = base("STATS_TREND");
-        r.params.put("period", per);
+        putPeriod(r, per, sp);
         if (!events.isEnabled()) {
             r.answer = "이벤트 로그가 꺼져 있어 통계를 낼 수 없습니다(gateway.event-log.enabled).";
             return r;
@@ -328,9 +373,9 @@ public class ChatService {
 
     private Reply authStats(JsonNode p) {
         String per = period(p);
-        StatsPeriod sp = resolve(per);
+        StatsPeriod sp = resolvePeriod(p, per);
         Reply r = base("STATS_AUTH");
-        r.params.put("period", per);
+        putPeriod(r, per, sp);
         if (!events.isEnabled()) {
             r.answer = "이벤트 로그가 꺼져 있어 통계를 낼 수 없습니다(gateway.event-log.enabled).";
             return r;
@@ -358,6 +403,52 @@ public class ChatService {
         return r;
     }
 
+    private static final java.util.regex.Pattern IP_CHARS = java.util.regex.Pattern.compile("[0-9A-Fa-f:.]{3,45}");
+    private static final java.time.format.DateTimeFormatter EVENT_TS = java.time.format.DateTimeFormatter.ofPattern("MM-dd HH:mm").withZone(java.time.ZoneId.systemDefault());
+
+    /** 개별 메일의 처리 결과와 판정 사유. 질의 값은 모두 서버가 검증/정제한 뒤 고정 조회에만 쓴다. */
+    private Reply eventSearch(JsonNode p) {
+        String per = p.has("period") ? period(p) : "last30d";
+        StatsPeriod sp = resolvePeriod(p, per);
+        Reply r = base("EVENT_SEARCH");
+        putPeriod(r, per, sp);
+        String sender = p.path("sender").asText("").trim().replaceAll("[^A-Za-z0-9@._+\\-가-힣]", "");
+        if (sender.length() > 60) {
+            sender = sender.substring(0, 60);
+        }
+        String ip = p.path("ip").asText("").trim();
+        if (!IP_CHARS.matcher(ip).matches()) {
+            ip = "";
+        }
+        String action = p.path("action").asText("ALL").toUpperCase(Locale.ROOT);
+        if (!ACTIONS.contains(action)) {
+            action = "ALL";
+        }
+        int limit = boundedInt(p, "limit", 5, 1, 10);
+        r.params.put("sender", sender);
+        r.params.put("ip", ip);
+        r.params.put("action", action);
+        r.params.put("limit", limit);
+        if (!events.isEnabled()) {
+            r.answer = "이벤트 로그가 꺼져 있어 검색할 수 없습니다(gateway.event-log.enabled).";
+            return r;
+        }
+        List<MailEvent> rows = events.search(sp.fromDay, sp.toDay, action, "ALL", ip.isEmpty() ? "ALL" : ip,
+                sender.isEmpty() ? "ALL" : "%" + sender + "%", limit);
+        String what = (sender.isEmpty() ? "" : "발신자 '" + sender + "' ") + (ip.isEmpty() ? "" : "IP " + ip + " ");
+        if (rows.isEmpty()) {
+            r.answer = periodLabel(sp) + " " + what + "조건에 맞는 처리 기록이 없습니다.";
+            return r;
+        }
+        r.answer = periodLabel(sp) + " " + what + (action.equals("ALL") ? "" : actionLabel(action) + " ") + "최근 처리 기록 " + rows.size() + "건입니다(판정 사유 포함).";
+        r.columns = Arrays.asList("시각", "처리", "필터", "발신자", "제목", "점수", "사유");
+        for (MailEvent e : rows) {
+            r.rows.add(Arrays.<Object>asList(EVENT_TS.format(java.time.Instant.ofEpochMilli(e.getEventAtMillis())), actionLabel(e.getAction()),
+                    e.getFilter(), cut(e.getFromAddr()), cut(e.getSubject()), e.getScore(), cut(e.getReason())));
+        }
+        return r;
+    }
+
     private Reply ruleList(JsonNode p) {
         String kw = p.path("keyword").asText("").trim();
         if (kw.length() > 40) {
@@ -373,16 +464,48 @@ public class ChatService {
                 hit.add(e);
             }
         }
-        if (hit.isEmpty()) {
-            r.answer = "'" + kw + "'와 관련된 룰을 찾지 못했습니다.";
+        // 문자열이 안 맞는 한글 질의("복권 당첨", "송금")를 위해 의미가 비슷한 룰도 찾는다(임베딩 서버를 쓸 수 있을 때).
+        List<RuleSemanticSearch.Hit> similar = new ArrayList<>();
+        boolean semanticFailed = false;
+        if (!kw.isEmpty() && semantic != null && semantic.isAvailable()) {
+            try {
+                for (RuleSemanticSearch.Hit h : semantic.search(kw, 8)) {
+                    boolean dup = false;
+                    for (SpamRuleEntry e : hit) {
+                        if (e.getId() != null && e.getId().equals(h.rule.getId())) {
+                            dup = true;
+                            break;
+                        }
+                    }
+                    if (!dup) {
+                        similar.add(h);
+                    }
+                }
+            } catch (Exception e) {
+                semanticFailed = true;
+                log.warn("룰 의미 검색 실패, 문자열 일치만 사용합니다: {}", e.getMessage());
+            }
+        }
+        if (hit.isEmpty() && similar.isEmpty()) {
+            r.answer = "'" + kw + "'와 관련된 룰을 찾지 못했습니다." + (semanticFailed ? " (의미 검색을 쓸 수 없어 문자열 일치만 확인했습니다.)" : "");
             return r;
         }
-        r.answer = (kw.isEmpty() ? "전체 룰" : "'" + kw + "' 관련 룰") + " " + hit.size() + "개 중 최대 15개를 보여 드립니다.";
-        r.columns = Arrays.asList("ID", "유형", "패턴", "가중치", "상태");
+        StringBuilder a = new StringBuilder(kw.isEmpty() ? "전체 룰" : "'" + kw + "' 관련 룰");
+        a.append(" 문자열 일치 ").append(hit.size()).append("개");
+        if (!similar.isEmpty()) {
+            a.append(", 의미가 비슷한 룰 ").append(similar.size()).append("개(유사도 표시)");
+        }
+        a.append("를 보여 드립니다.").append(semanticFailed ? " (의미 검색을 쓸 수 없어 문자열 일치만 확인했습니다.)" : "");
+        r.answer = a.toString();
+        r.columns = Arrays.asList("ID", "유형", "패턴", "가중치", "상태", "유사도");
         for (int i = 0; i < Math.min(15, hit.size()); i++) {
             SpamRuleEntry e = hit.get(i);
-            String pat = e.getPattern().length() > 60 ? e.getPattern().substring(0, 60) + "…" : e.getPattern();
-            r.rows.add(Arrays.<Object>asList(e.getId(), e.getRuleType().name(), pat, e.getWeight(), e.isEnabled() ? "활성" : "비활성"));
+            r.rows.add(Arrays.<Object>asList(e.getId(), e.getRuleType().name(), cut(e.getPattern()), e.getWeight(), e.isEnabled() ? "활성" : "비활성", ""));
+        }
+        for (RuleSemanticSearch.Hit h : similar) {
+            SpamRuleEntry e = h.rule;
+            r.rows.add(Arrays.<Object>asList(e.getId(), e.getRuleType().name(), cut(e.getPattern()), e.getWeight(), e.isEnabled() ? "활성" : "비활성",
+                    String.format(Locale.ROOT, "%.2f", h.similarity)));
         }
         return r;
     }
