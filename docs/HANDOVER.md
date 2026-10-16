@@ -128,3 +128,6 @@ gateway:
 ## 보류 요약 메일 (2026-10-16 추가)
 - `DigestService`(`quarantine` 패키지): `@Scheduled(cron = "${gateway.digest.cron:0 0 9 * * *}")`, 내용은 `QuarantineService`(보류 목록·개수·임박 개수)와 `MailEventService`(전날 현황)로 구성, 발송은 `QuarantineService.deliver`(Hedwig 백엔드 SMTP 직접). 수동: `/admin/quarantine/digest/{preview,send}`.
 - egov: `gateway.digest.enabled: false`(수신자는 시험 계정 `t11111t@egov.handysoft.co.kr`). **실제 관리자 주소로 바꾸고 `enabled: true`로 켜야 매일 발송된다.** 수신자가 Hedwig의 우리 도메인 주소가 아니면 Hedwig가 거절/릴레이하므로 외부 주소(gmail 등)는 이 방식으로 보낼 수 없다.
+
+## AI 챗 격리함 질의 (2026-10-16 추가)
+- `ChatService`에 의도 `QUARANTINE_SUMMARY` 추가(상태별 건수 + 최근 보류 5건, 읽기 전용). 격리함 전달·삭제 같은 변경은 챗에서 하지 않고 '격리함' 탭에서 한다. egov에서 qwen3-coder:30b로 "보류된 메일 몇 건이야?", "격리함 현황 알려줘" 등 4가지 표현이 모두 올바른 의도로 분류되고 기존 질문 6종도 그대로 분류됨을 확인했다(전체 정확도 재측정은 하지 않음).
