@@ -232,7 +232,7 @@ public class MailStatsController {
     private static String normalizeFilter(String f) {
         String u = f == null ? "ALL" : f.trim().toUpperCase();
         switch (u) {
-            case "ALL": case "RBL": case "BLACKLIST": case "WHITELIST": case "GREYLIST": case "RULE": case "LLM": case "NONE":
+            case "ALL": case "RBL": case "RELAY": case "BLACKLIST": case "WHITELIST": case "GREYLIST": case "RULE": case "LLM": case "NONE":
                 return u;
             default:
                 return null;

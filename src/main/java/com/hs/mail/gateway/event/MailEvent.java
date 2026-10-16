@@ -12,6 +12,7 @@ public class MailEvent {
     public static final String DEFERRED = "DEFERRED";
 
     public static final String F_RBL = "RBL";
+    public static final String F_RELAY = "RELAY";
     public static final String F_BLACKLIST = "BLACKLIST";
     public static final String F_WHITELIST = "WHITELIST";
     public static final String F_GREYLIST = "GREYLIST";

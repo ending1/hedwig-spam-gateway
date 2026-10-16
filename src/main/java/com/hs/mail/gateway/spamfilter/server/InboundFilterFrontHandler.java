@@ -64,6 +64,13 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
     private MailEventService mailEvents;
     /** 수신 메일 인증(SPF/DKIM/DMARC) 검증기(선택). 없거나 꺼져 있으면 검증하지 않는다. */
     private com.hs.mail.gateway.auth.AuthChecker authChecker;
+    /** 수신자 도메인 정책(릴레이 차단, 선택). */
+    private com.hs.mail.gateway.spamfilter.RecipientPolicy recipientPolicy;
+
+    public InboundFilterFrontHandler withRecipientPolicy(com.hs.mail.gateway.spamfilter.RecipientPolicy recipientPolicy) {
+        this.recipientPolicy = recipientPolicy;
+        return this;
+    }
 
     public InboundFilterFrontHandler withAuthChecker(com.hs.mail.gateway.auth.AuthChecker authChecker) {
         this.authChecker = authChecker;
@@ -191,6 +198,15 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
         }
         String rcpt = m.group(1);
         String mailFrom = session.mailFrom;
+
+        // 릴레이 차단: Hedwig는 모든 접속을 게이트웨이(127.0.0.1)로 보므로 외부 도메인 릴레이를 스스로 막지 못한다.
+        if (recipientPolicy != null && !recipientPolicy.allows(clientIp(ctx), rcpt)) {
+            log.warn("릴레이 거부: ip={}, from={}, to={}", clientIp(ctx), mailFrom, rcpt);
+            recordEvent(MailEvent.REJECTED, MailEvent.F_RELAY, clientIp(ctx), mailFrom, Collections.singletonList(rcpt), "", 0,
+                    "릴레이 거부(우리 도메인이 아닌 수신자)");
+            ctx.writeAndFlush("554 5.7.1 Relay access denied\r\n");
+            return;
+        }
 
         MailListVerdict listVerdict = mailListService.check(mailFrom, rcpt);
         if (listVerdict == MailListVerdict.BLACK

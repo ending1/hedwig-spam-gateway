@@ -34,6 +34,7 @@ public class GatewayProperties {
     private final EventLog eventLog = new EventLog();
     private final Chat chat = new Chat();
     private final Auth auth = new Auth();
+    private final Recipient recipient = new Recipient();
     private final SpamReportOptions spamReport = new SpamReportOptions();
 
     public int getListenPort() {
@@ -126,6 +127,27 @@ public class GatewayProperties {
 
     public Auth getAuth() {
         return auth;
+    }
+
+    public Recipient getRecipient() {
+        return recipient;
+    }
+
+    /**
+     * 수신자 도메인 정책(RCPT 단계). 게이트웨이 뒤의 Hedwig는 모든 접속을 게이트웨이(127.0.0.1)로 보므로 자체 릴레이 제한이
+     * 외부 발신자에게 적용되지 않는다. 그래서 게이트웨이가 "우리 도메인으로 오는 메일만 받는다"를 직접 지킨다.
+     * localDomains가 비어 있으면 이 정책은 꺼진 것과 같다(기존 동작 유지).
+     */
+    public static class Recipient {
+        /** 이 서버가 받는 수신 도메인(대소문자 무시). ".example.com"처럼 점으로 시작하면 그 하위 도메인 전체. */
+        private java.util.List<String> localDomains = new java.util.ArrayList<>();
+        /** 우리 도메인이 아닌 곳으로도 보낼 수 있는(릴레이 허용) 접속 대역. 비워 두면 누구도 릴레이할 수 없다. */
+        private java.util.List<String> relayNetworks = new java.util.ArrayList<>();
+
+        public java.util.List<String> getLocalDomains() { return localDomains; }
+        public void setLocalDomains(java.util.List<String> localDomains) { this.localDomains = localDomains; }
+        public java.util.List<String> getRelayNetworks() { return relayNetworks; }
+        public void setRelayNetworks(java.util.List<String> relayNetworks) { this.relayNetworks = relayNetworks; }
     }
 
     /**

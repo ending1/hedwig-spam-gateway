@@ -53,6 +53,12 @@ public class GatewayChannelInitializer extends ChannelInitializer<SocketChannel>
     /** 통계/로그용 이벤트 기록기(선택). 테스트처럼 스프링 밖에서 만들면 null이라 기록하지 않는다. */
     private com.hs.mail.gateway.event.MailEventService mailEvents;
     private com.hs.mail.gateway.auth.AuthChecker authChecker;
+    private com.hs.mail.gateway.spamfilter.RecipientPolicy recipientPolicy;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    public void setRecipientPolicy(com.hs.mail.gateway.spamfilter.RecipientPolicy recipientPolicy) {
+        this.recipientPolicy = recipientPolicy;
+    }
 
     @org.springframework.beans.factory.annotation.Autowired(required = false)
     public void setAuthChecker(com.hs.mail.gateway.auth.AuthChecker authChecker) {
@@ -111,7 +117,7 @@ public class GatewayChannelInitializer extends ChannelInitializer<SocketChannel>
                     .addLast("stringEncoder", new StringEncoder())
                     .addLast("spamFilterProxy", new InboundFilterFrontHandler(properties, spamClassifier,
                             spamFilterStats, connectionStats, spamClassifierExecutor.get(), greylistService,
-                            mailListService, ruleBasedSpamChecker).withMailEvents(mailEvents).withAuthChecker(authChecker));
+                            mailListService, ruleBasedSpamChecker).withMailEvents(mailEvents).withAuthChecker(authChecker).withRecipientPolicy(recipientPolicy));
         } else {
             ch.pipeline().addLast("relay", new RelayHandler(properties, connectionStats));
         }

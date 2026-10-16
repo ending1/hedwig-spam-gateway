@@ -1,6 +1,7 @@
 package com.hs.mail.gateway.spamfilter.server;
 
 import com.hs.mail.gateway.config.GatewayProperties;
+import com.hs.mail.gateway.spamfilter.RecipientPolicy;
 import com.hs.mail.gateway.greylist.GreylistDao;
 import com.hs.mail.gateway.greylist.GreylistService;
 import com.hs.mail.gateway.maillist.MailListDao;
@@ -59,6 +60,7 @@ class InboundFilterFrontHandlerTest {
     private ExecutorService classifierExecutor;
     private int gatewayPort;
     private com.hs.mail.gateway.auth.AuthChecker authChecker;
+    private com.hs.mail.gateway.spamfilter.RecipientPolicy recipientPolicy;
     /** 룰기반 필터 사용 여부(기본 꺼짐: 기존 시나리오는 룰 없이 LLM 분류만 검증한다). */
     private boolean enableRules;
 
@@ -105,7 +107,7 @@ class InboundFilterFrontHandlerTest {
                                 .addLast(new InboundFilterFrontHandler(properties, classifier, spamStats,
                                         connectionStats, classifierExecutor, greylistService,
                                         mailListService, new RuleBasedSpamChecker(properties, com.hs.mail.gateway.spamfilter.SpamRuleService.defaults()))
-                                        .withAuthChecker(authChecker));
+                                        .withAuthChecker(authChecker).withRecipientPolicy(recipientPolicy));
                     }
                 });
         serverChannel = bootstrap.bind(0).sync().channel();
@@ -293,6 +295,12 @@ class InboundFilterFrontHandlerTest {
         private Thread thread;
         private final AtomicReference<List<String>> capturedDataLines = new AtomicReference<>();
         private final java.util.concurrent.CountDownLatch dataCaptured = new java.util.concurrent.CountDownLatch(1);
+        /** backend가 받은 명령 줄(EHLO/MAIL/RCPT 등)을 순서대로 기록한다. */
+        private final List<String> commands = java.util.Collections.synchronizedList(new ArrayList<String>());
+
+        List<String> getCapturedCommands() {
+            return new ArrayList<>(commands);
+        }
 
         void start() throws IOException {
             serverSocket = new ServerSocket(0);
@@ -325,6 +333,7 @@ class InboundFilterFrontHandlerTest {
 
                 String line;
                 while ((line = in.readLine()) != null) {
+                    commands.add(line);
                     String upper = line.toUpperCase(java.util.Locale.US);
                     if (upper.startsWith("EHLO") || upper.startsWith("HELO")) {
                         out.print("250 fake-hedwig Hello\r\n");
@@ -426,6 +435,55 @@ class InboundFilterFrontHandlerTest {
         List<String> out = InboundFilterFrontHandler.stripSpamHeaders(in);
         assertEquals(java.util.Arrays.asList("Received: from x", "X-Spam-Level: ***", "Subject: hi", "", "X-Spam-Flag: YES", "body"), out);
         assertEquals(9, in.size(), "입력 목록은 바꾸지 않는다");
+    }
+
+    private RecipientPolicy policy(String relayNetwork) {
+        GatewayProperties p = new GatewayProperties();
+        p.getRecipient().setLocalDomains(java.util.Arrays.asList("handysoft.co.kr"));
+        if (relayNetwork != null) {
+            p.getRecipient().setRelayNetworks(java.util.Arrays.asList(relayNetwork));
+        }
+        return new RecipientPolicy(p);
+    }
+
+    /** 한 세션에서 MAIL FROM 뒤 RCPT TO를 차례로 보내고 각 응답 한 줄을 돌려준다(fake backend는 연결 하나만 받는다). */
+    private List<String> rcptResponses(String... rcpts) throws Exception {
+        try (Socket socket = new Socket("127.0.0.1", gatewayPort)) {
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+            PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
+            in.readLine();
+            out.print("EHLO client\r\n"); out.flush();
+            in.readLine();
+            out.print("MAIL FROM:<sender@example.com>\r\n"); out.flush();
+            in.readLine();
+            List<String> responses = new ArrayList<>();
+            for (String rcpt : rcpts) {
+                out.print("RCPT TO:<" + rcpt + ">\r\n"); out.flush();
+                responses.add(in.readLine());
+            }
+            out.print("QUIT\r\n"); out.flush();
+            return responses;
+        }
+    }
+
+    @Test
+    void 외부_도메인_수신자는_554로_거부하고_backend에는_전달하지_않는다() throws Exception {
+        recipientPolicy = policy(null);
+        start(fixedVerdictClassifier(false));
+
+        List<String> r = rcptResponses("victim@example.org", "victim@HandySoft.co.kr");
+        assertTrue(r.get(0).startsWith("554 5.7.1"), r.get(0));
+        assertTrue(r.get(1).startsWith("250"), "우리 도메인은 평소대로 전달: " + r.get(1));
+        String seen = fakeBackend.getCapturedCommands().toString().toUpperCase();
+        assertFalse(seen.contains("EXAMPLE.ORG"), "거부한 수신자는 Hedwig로 가지 않는다: " + seen);
+        assertTrue(seen.contains("RCPT TO:<VICTIM@HANDYSOFT.CO.KR>"), seen);
+    }
+
+    @Test
+    void 릴레이_허용_대역의_접속은_외부_도메인도_통과한다() throws Exception {
+        recipientPolicy = policy("127.0.0.0/8");
+        start(fixedVerdictClassifier(false));
+        assertTrue(rcptResponses("friend@example.org").get(0).startsWith("250"));
     }
 
     /** 고정 레코드를 돌려주는 가짜 DNS. */
