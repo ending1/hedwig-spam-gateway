@@ -62,6 +62,7 @@ class InboundFilterFrontHandlerTest {
     private com.hs.mail.gateway.auth.AuthChecker authChecker;
     private com.hs.mail.gateway.spamfilter.RecipientPolicy recipientPolicy;
     private com.hs.mail.gateway.quarantine.QuarantineService quarantine;
+    private MultiHedwigServer multiBackend;
     /** 룰기반 필터 사용 여부(기본 꺼짐: 기존 시나리오는 룰 없이 LLM 분류만 검증한다). */
     private boolean enableRules;
 
@@ -80,12 +81,19 @@ class InboundFilterFrontHandlerTest {
     }
 
     private void start(SpamClassifier classifier, GreylistService greylistService, MailListService mailListService) throws Exception {
-        fakeBackend = new FakeHedwigServer();
-        fakeBackend.start();
+        int backendPort;
+        if (multiBackend != null) {
+            multiBackend.start();
+            backendPort = multiBackend.getPort();
+        } else {
+            fakeBackend = new FakeHedwigServer();
+            fakeBackend.start();
+            backendPort = fakeBackend.getPort();
+        }
 
         GatewayProperties properties = new GatewayProperties();
         properties.getBackend().setHost("127.0.0.1");
-        properties.getBackend().setPort(fakeBackend.getPort());
+        properties.getBackend().setPort(backendPort);
         properties.getSpamFilter().setEnabled(true);
         properties.getRuleFilter().setEnabled(enableRules);
 
@@ -122,6 +130,7 @@ class InboundFilterFrontHandlerTest {
         if (workerGroup != null) workerGroup.shutdownGracefully();
         if (classifierExecutor != null) classifierExecutor.shutdown();
         if (fakeBackend != null) fakeBackend.stop();
+        if (multiBackend != null) multiBackend.stop();
     }
 
     private List<String> runTransaction() throws Exception {
@@ -288,6 +297,84 @@ class InboundFilterFrontHandlerTest {
                 return "stub";
             }
         };
+    }
+
+    /**
+     * 여러 연결을 차례로 받는 fake Hedwig(보류로 backend를 교체하는 시험용). 연결마다 받은 명령을 기록하고, 완전히 끝난
+     * DATA(마침표까지 받은 것)만 delivered에 남긴다. EHLO에는 여러 줄(250-...) 응답을 해서 응답 억제 로직도 시험한다.
+     */
+    private static class MultiHedwigServer {
+        private ServerSocket serverSocket;
+        final List<List<String>> connections = java.util.Collections.synchronizedList(new ArrayList<List<String>>());
+        final List<List<String>> delivered = java.util.Collections.synchronizedList(new ArrayList<List<String>>());
+
+        void start() throws IOException {
+            serverSocket = new ServerSocket(0);
+            Thread acceptor = new Thread(() -> {
+                while (!serverSocket.isClosed()) {
+                    try {
+                        final Socket c = serverSocket.accept();
+                        Thread h = new Thread(() -> handle(c));
+                        h.setDaemon(true);
+                        h.start();
+                    } catch (IOException e) {
+                        return;
+                    }
+                }
+            });
+            acceptor.setDaemon(true);
+            acceptor.start();
+        }
+
+        int getPort() {
+            return serverSocket.getLocalPort();
+        }
+
+        void stop() throws IOException {
+            serverSocket.close();
+        }
+
+        private void handle(Socket client) {
+            List<String> cmds = java.util.Collections.synchronizedList(new ArrayList<String>());
+            connections.add(cmds);
+            try (Socket c = client) {
+                BufferedReader in = new BufferedReader(new InputStreamReader(c.getInputStream(), StandardCharsets.UTF_8));
+                PrintWriter out = new PrintWriter(new OutputStreamWriter(c.getOutputStream(), StandardCharsets.UTF_8), true);
+                out.print("220 fake-hedwig ready\r\n"); out.flush();
+                String line;
+                while ((line = in.readLine()) != null) {
+                    cmds.add(line);
+                    String u = line.toUpperCase(java.util.Locale.US);
+                    if (u.startsWith("EHLO") || u.startsWith("HELO")) {
+                        out.print("250-fake-hedwig Hello\r\n250-8BITMIME\r\n250 SIZE 10000000\r\n");
+                    } else if (u.startsWith("MAIL FROM") || u.startsWith("RCPT TO")) {
+                        out.print("250 2.1.0 OK\r\n");
+                    } else if (u.equals("RSET")) {
+                        out.print("250 2.0.0 reset\r\n");
+                    } else if (u.equals("DATA")) {
+                        out.print("354 Start mail input\r\n"); out.flush();
+                        List<String> lines = new ArrayList<>();
+                        String d;
+                        boolean complete = false;
+                        while ((d = in.readLine()) != null) {
+                            if (d.equals(".")) { complete = true; break; }
+                            lines.add(d);
+                        }
+                        if (!complete) {
+                            return; // 마침표 전에 연결이 끊김 = 메일은 버려진다
+                        }
+                        delivered.add(lines);
+                        out.print("250 2.6.0 queued\r\n");
+                    } else if (u.equals("QUIT")) {
+                        out.print("221 bye\r\n"); out.flush();
+                        return;
+                    }
+                    out.flush();
+                }
+            } catch (IOException ignored) {
+                // 연결 종료
+            }
+        }
     }
 
     /** EHLO/MAIL FROM/RCPT TO/DATA를 표준적으로 응답하는 최소 fake Hedwig. */
@@ -463,6 +550,161 @@ class InboundFilterFrontHandlerTest {
         runTransaction();
         fakeBackend.awaitDataCaptured(5, TimeUnit.SECONDS);
         org.mockito.Mockito.verify(quarantine, org.mockito.Mockito.never()).store(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyDouble(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyList());
+    }
+
+    /** 호출 순서대로 미리 정한 판정을 돌려주는 분류기(첫 메일은 스팸, 둘째는 정상 등). */
+    private SpamClassifier sequenceClassifier(final boolean... spams) {
+        return new SpamClassifier() {
+            private int i;
+
+            @Override
+            public synchronized SpamVerdict classify(SpamCheckRequest request) {
+                boolean spam = spams[Math.min(i++, spams.length - 1)];
+                return new SpamVerdict(spam, spam ? 0.95 : 0.1, "test", "stub");
+            }
+
+            @Override
+            public String name() {
+                return "stub";
+            }
+        };
+    }
+
+    private com.hs.mail.gateway.quarantine.QuarantineService holdingQuarantine(long storeHeldResult) {
+        com.hs.mail.gateway.quarantine.QuarantineService q =
+                org.mockito.Mockito.mock(com.hs.mail.gateway.quarantine.QuarantineService.class);
+        org.mockito.Mockito.when(q.isEnabled()).thenReturn(true);
+        org.mockito.Mockito.when(q.isHoldEnabled()).thenReturn(true);
+        org.mockito.Mockito.when(q.getHoldMinScore()).thenReturn(0.8);
+        org.mockito.Mockito.when(q.storeHeld(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyDouble(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyList())).thenReturn(storeHeldResult);
+        return q;
+    }
+
+    private static void send(PrintWriter out, String line) {
+        out.print(line + "\r\n");
+        out.flush();
+    }
+
+    /** 응답 한 건(여러 줄 응답이면 마지막 줄까지)을 읽어 줄 목록으로 돌려준다. */
+    private static List<String> readReply(BufferedReader in) throws IOException {
+        List<String> lines = new ArrayList<>();
+        String l;
+        do {
+            l = in.readLine();
+            lines.add(l);
+        } while (l != null && l.length() > 3 && l.charAt(3) == '-');
+        return lines;
+    }
+
+    @Test
+    void 보류된_스팸은_수신자에게_전달되지_않고_같은_연결의_다음_메일은_새_backend로_정상_전달된다() throws Exception {
+        multiBackend = new MultiHedwigServer();
+        quarantine = holdingQuarantine(42);
+        start(sequenceClassifier(true, false));
+
+        try (Socket socket = new Socket("127.0.0.1", gatewayPort)) {
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+            PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
+            assertTrue(readReply(in).get(0).startsWith("220"));
+            send(out, "EHLO client.example");
+            assertEquals(3, readReply(in).size(), "EHLO 응답 3줄을 그대로 받는다");
+
+            // 1번 메일: 스팸 -> 보류
+            send(out, "MAIL FROM:<spam@bad.example>");
+            assertTrue(readReply(in).get(0).startsWith("250"));
+            send(out, "RCPT TO:<victim@handysoft.co.kr>");
+            assertTrue(readReply(in).get(0).startsWith("250"));
+            send(out, "DATA");
+            assertTrue(readReply(in).get(0).startsWith("354"));
+            send(out, "Subject: hold me");
+            send(out, "");
+            send(out, "bad body");
+            send(out, ".");
+            List<String> held = readReply(in);
+            assertEquals(1, held.size(), "게이트웨이의 수락 응답 한 줄만 받는다: " + held);
+            assertTrue(held.get(0).startsWith("250 2.0.0 Ok: queued"), held.get(0));
+
+            // 같은 연결에서 2번 메일: 정상 -> 새 backend로 전달 (배너/EHLO 응답이 끼어들면 안 된다)
+            send(out, "MAIL FROM:<friend@good.example>");
+            List<String> mailReply = readReply(in);
+            assertEquals(1, mailReply.size(), "배너나 EHLO 응답이 섞이면 안 된다: " + mailReply);
+            assertTrue(mailReply.get(0).startsWith("250 2.1.0"), mailReply.get(0));
+            send(out, "RCPT TO:<victim@handysoft.co.kr>");
+            assertTrue(readReply(in).get(0).startsWith("250"));
+            send(out, "DATA");
+            assertTrue(readReply(in).get(0).startsWith("354"));
+            send(out, "Subject: good mail");
+            send(out, "");
+            send(out, "good body");
+            send(out, ".");
+            assertTrue(readReply(in).get(0).startsWith("250 2.6.0"), "정상 메일은 backend 응답이 그대로 온다");
+            send(out, "QUIT");
+        }
+
+        assertEquals(2, multiBackend.connections.size(), "보류하며 backend 연결을 한 번 교체했다");
+        assertEquals(1, multiBackend.delivered.size(), "스팸은 전달되지 않고 정상 메일만 전달");
+        String deliveredText = String.join("\n", multiBackend.delivered.get(0));
+        assertTrue(deliveredText.contains("good body") && !deliveredText.contains("bad body"), deliveredText);
+        assertTrue(multiBackend.connections.get(1).get(0).startsWith("EHLO client.example"),
+                "새 연결에서 같은 이름으로 EHLO를 다시 했다: " + multiBackend.connections.get(1));
+        org.mockito.Mockito.verify(quarantine, org.mockito.Mockito.times(1)).storeHeld(org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.eq("spam@bad.example"), org.mockito.ArgumentMatchers.anyList(),
+                org.mockito.ArgumentMatchers.eq("hold me"), org.mockito.ArgumentMatchers.anyDouble(),
+                org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyList());
+    }
+
+    @Test
+    void 보류_보관에_실패하면_메일을_잃지_않도록_스팸_태그로_전달한다() throws Exception {
+        multiBackend = new MultiHedwigServer();
+        quarantine = holdingQuarantine(-1);
+        start(sequenceClassifier(true));
+
+        try (Socket socket = new Socket("127.0.0.1", gatewayPort)) {
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+            PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
+            readReply(in);
+            send(out, "EHLO client.example"); readReply(in);
+            send(out, "MAIL FROM:<spam@bad.example>"); readReply(in);
+            send(out, "RCPT TO:<victim@handysoft.co.kr>"); readReply(in);
+            send(out, "DATA"); readReply(in);
+            send(out, "Subject: s"); send(out, ""); send(out, "body"); send(out, ".");
+            assertTrue(readReply(in).get(0).startsWith("250 2.6.0"), "backend가 받은 것으로 응답");
+            send(out, "QUIT");
+        }
+        assertEquals(1, multiBackend.connections.size(), "보류하지 않았으니 연결 교체 없음");
+        assertEquals(1, multiBackend.delivered.size());
+        assertTrue(multiBackend.delivered.get(0).get(0).startsWith("X-Spam-Flag: YES") || String.join("\n", multiBackend.delivered.get(0)).contains("X-Spam-Flag: YES"),
+                "스팸 태그가 붙어 전달: " + multiBackend.delivered.get(0));
+    }
+
+    @Test
+    void 점수가_보류_기준_미만인_스팸은_평소처럼_태그로_전달된다() throws Exception {
+        multiBackend = new MultiHedwigServer();
+        quarantine = holdingQuarantine(42);
+        org.mockito.Mockito.when(quarantine.getHoldMinScore()).thenReturn(0.99);
+        start(sequenceClassifier(true));
+
+        try (Socket socket = new Socket("127.0.0.1", gatewayPort)) {
+            BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+            PrintWriter out = new PrintWriter(new OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8), true);
+            readReply(in);
+            send(out, "EHLO c"); readReply(in);
+            send(out, "MAIL FROM:<a@b.example>"); readReply(in);
+            send(out, "RCPT TO:<victim@handysoft.co.kr>"); readReply(in);
+            send(out, "DATA"); readReply(in);
+            send(out, "Subject: s"); send(out, ""); send(out, "body"); send(out, ".");
+            readReply(in);
+            send(out, "QUIT");
+        }
+        assertEquals(1, multiBackend.delivered.size());
+        org.mockito.Mockito.verify(quarantine, org.mockito.Mockito.never()).storeHeld(org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyList(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.anyDouble(), org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.anyList());

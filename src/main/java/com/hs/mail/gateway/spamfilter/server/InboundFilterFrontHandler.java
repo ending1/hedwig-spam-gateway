@@ -111,8 +111,14 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
     @Override
     public void channelActive(ChannelHandlerContext ctx) {
         connectionStats.connectionOpened();
-        Channel frontChannel = ctx.channel();
+        connectBackend(ctx.channel(), 0, false);
+    }
 
+    /**
+     * backend(Hedwig)에 연결한다. generation은 연결의 세대이고, replayHelo가 true면(보류로 backend를 교체한 경우)
+     * 이미 EHLO를 마친 client 상태에 맞추려고 연결 직후 EHLO를 다시 보낸다(그 응답은 BackHandler가 버린다).
+     */
+    private void connectBackend(Channel frontChannel, int generation, boolean replayHelo) {
         Bootstrap bootstrap = new Bootstrap();
         bootstrap.group(frontChannel.eventLoop())
                 .channel(frontChannel.getClass())
@@ -123,14 +129,22 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
                                 .addLast(new DelimiterBasedFrameDecoder(8192, Delimiters.lineDelimiter()))
                                 .addLast(new StringDecoder())
                                 .addLast(new StringEncoder())
-                                .addLast(new InboundFilterBackHandler(frontChannel, session));
+                                .addLast(new InboundFilterBackHandler(frontChannel, session, generation));
                     }
                 });
 
         bootstrap.connect(properties.getBackend().getHost(), properties.getBackend().getPort())
                 .addListener((ChannelFutureListener) future -> {
                     if (future.isSuccess()) {
+                        if (generation != session.backendGeneration) {
+                            future.channel().close(); // 그 사이 또 교체되었다
+                            return;
+                        }
                         backendChannel = future.channel();
+                        if (replayHelo) {
+                            String name = session.helo == null || session.helo.isEmpty() ? "gateway" : session.helo;
+                            backendChannel.writeAndFlush("EHLO " + name + "\r\n");
+                        }
                         flushPending();
                     } else {
                         log.error("Hedwig backend({}:{}) 연결 실패, 프론트 커넥션 종료",
@@ -442,7 +456,69 @@ public class InboundFilterFrontHandler extends SimpleChannelInboundHandler<Strin
         return MailEvent.F_LLM;
     }
 
+    /** 판정 결과를 처리한다. 확실한 스팸(보류 설정 + 점수 이상)은 전달하지 않고 보류하고, 그 밖에는 평소처럼 전달한다. */
     private void deliverBufferedData(ChannelHandlerContext ctx, SpamVerdict verdict, List<String> bufferedLines) {
+        if (verdict.isSpam() && quarantineService != null && quarantineService.isHoldEnabled()
+                && verdict.getScore() >= quarantineService.getHoldMinScore()) {
+            holdOrDeliver(ctx, verdict, bufferedLines);
+            return;
+        }
+        deliverNormally(ctx, verdict, bufferedLines);
+    }
+
+    /**
+     * 보류: 메일을 격리함에 안전하게 저장한 뒤에만(저장이 확인된 경우에만) 받는 사람에게 전달하지 않는다. 발신자에게는 250으로
+     * 수락 응답을 하고 backend 연결은 DATA 대기 상태이므로 새 연결로 바꾼다. 저장에 실패하면 메일을 잃지 않도록 평소대로 전달한다.
+     * 저장은 디스크/DB 작업이라 별도 스레드에서 한다.
+     */
+    private void holdOrDeliver(ChannelHandlerContext ctx, SpamVerdict verdict, List<String> bufferedLines) {
+        ctx.channel().config().setAutoRead(false);
+        final String ip = clientIp(ctx);
+        final String from = session.mailFrom;
+        final List<String> rcpts = new java.util.ArrayList<>(session.recipients);
+        final String auth = session.authResult == null ? "" : session.authResult.summary();
+        final String subject = SpamCheckRequest.from(from, rcpts, bufferedLines, 1).getSubject();
+        classifierExecutor.submit(() -> {
+            long id = -1;
+            try {
+                id = quarantineService.storeHeld(ip, from, rcpts, subject, verdict.getScore(), filterOf(verdict),
+                        verdict.getReason(), auth, bufferedLines);
+            } catch (RuntimeException e) {
+                log.warn("보류 보관 중 오류, 보류하지 않고 전달합니다: {}", e.getMessage());
+            }
+            final long heldId = id;
+            ctx.channel().eventLoop().execute(() -> {
+                if (heldId > 0) {
+                    spamStats.recordSpam();
+                    log.info("스팸 보류: 격리함 #{}, score={}, reason={}", heldId, verdict.getScore(), verdict.getReason());
+                    recordEvent(MailEvent.SPAM, filterOf(verdict), ip, from, rcpts, subject, verdict.getScore(),
+                            "[보류] " + verdict.getReason());
+                    holdMessage(ctx);
+                } else {
+                    deliverNormally(ctx, verdict, bufferedLines);
+                }
+            });
+        });
+    }
+
+    /** 보류를 확정한다: 발신자에게 수락 응답을 하고, DATA 대기 상태인 backend 연결을 새 연결로 교체한다. */
+    private void holdMessage(ChannelHandlerContext ctx) {
+        session.dataPending = false;
+        session.bufferingData = false;
+        session.resetTransaction();            // MAIL/RCPT/버퍼 초기화(helo는 연결 단위라 유지)
+        Channel old = backendChannel;
+        backendChannel = null;                 // 이후 client 명령은 새 연결이 준비될 때까지 pending에 쌓인다
+        session.backendGeneration++;
+        session.suppressReplies = 2;           // 새 연결의 배너 + EHLO 응답은 client에 전달하지 않는다
+        if (old != null) {
+            old.close();                       // DATA 도중 끊으면 Hedwig는 이 메일을 버린다
+        }
+        connectBackend(ctx.channel(), session.backendGeneration, true);
+        ctx.writeAndFlush("250 2.0.0 Ok: queued\r\n");
+        ctx.channel().config().setAutoRead(true);
+    }
+
+    private void deliverNormally(ChannelHandlerContext ctx, SpamVerdict verdict, List<String> bufferedLines) {
         boolean quarantine = verdict.isSpam() && quarantineService != null && quarantineService.isEnabled();
         if ((mailEvents != null && mailEvents.isEnabled()) || quarantine) {
             String subject = SpamCheckRequest.from(session.mailFrom, session.recipients, bufferedLines, 1).getSubject();

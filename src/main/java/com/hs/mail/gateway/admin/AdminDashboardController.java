@@ -127,9 +127,9 @@ public class AdminDashboardController {
                 "</section>\n" +
                 "<section class=\"tab-panel\" id=\"tab-quarantine\">\n" +
                 "  <h2>격리함 (스팸 판정 메일 보관)</h2>\n" +
-                "  <p style=\"font-size:0.85rem;color:#555\">스팸으로 판정된 메일은 평소처럼 스팸 태그가 붙어 전달되고, 관리자 검토용 사본이 여기 보관됩니다. <b>복구</b>는 스팸 태그 없이 수신자에게 한 통 더 전달합니다. 보관 기간이 지나면 자동 삭제됩니다. 원문은 외부 메일이므로 첨부파일(EML)로만 받을 수 있습니다.</p>\n" +
+                "  <p style=\"font-size:0.85rem;color:#555\"><b>보류 중</b>은 확실한 스팸이라 수신자에게 전달하지 않고 여기에만 있는 메일이며 <b>전달</b>해야 도착합니다(오탐이면 전달+허용). <b>사본</b>은 스팸 태그로 이미 전달된 메일의 검토용 복사본이고, <b>복구</b>는 스팸 태그 없이 한 통 더 전달합니다. 보류 메일은 보관 기간이 지나면 영구 삭제되니 주기적으로 확인하세요. 보관 기간이 지나면 자동 삭제됩니다. 원문은 외부 메일이므로 첨부파일(EML)로만 받을 수 있습니다.</p>\n" +
                 "  <form id=\"qForm\" onsubmit=\"return false\">\n" +
-                "    <select id=\"qStatus\"><option value=\"ALL\">상태 전체</option><option value=\"QUARANTINED\">격리 중</option><option value=\"RELEASED\">복구됨</option></select>\n" +
+                "    <select id=\"qStatus\"><option value=\"ALL\">상태 전체</option><option value=\"HELD\">보류 중(미전달)</option><option value=\"QUARANTINED\">사본(전달됨)</option><option value=\"RELEASED\">복구됨</option></select>\n" +
                 "    <select id=\"qPeriod\"><option value=\"today\">오늘</option><option value=\"last7d\">최근 7일</option><option value=\"last30d\" selected>최근 30일</option></select>\n" +
                 "    <input id=\"qSender\" placeholder=\"발신자 일부\" size=\"22\"> <button id=\"qFind\">조회</button> <span id=\"qCounts\" style=\"color:#555\"></span>\n" +
                 "  </form>\n" +
@@ -289,17 +289,17 @@ public class AdminDashboardController {
                 "function encodeAttr(s) { return (s == null ? '' : s).replace(/'/g, \"\\\\'\"); }\n" +
                 "let ruleById = {};\n" +
                 "const TAB_STORE = 'hedwigDashTab';\n" +
-                "const Q_STATUS = { QUARANTINED: '격리 중', RELEASED: '복구됨' };\n" +
+                "const Q_STATUS = { HELD: '보류 중(미전달)', QUARANTINED: '사본(전달됨)', RELEASED: '복구됨' };\n" +
                 "async function loadQuarantine() {\n" +
                 "  const q = '?period=' + document.getElementById('qPeriod').value + '&status=' + document.getElementById('qStatus').value +\n" +
                 "    (document.getElementById('qSender').value.trim() ? '&sender=' + encodeURIComponent(document.getElementById('qSender').value.trim()) : '');\n" +
                 "  const res = await adminFetch('/admin/quarantine' + q); if (!res.ok) return;\n" +
                 "  const d = await res.json(); const c = d.counts || {};\n" +
-                "  document.getElementById('qCounts').textContent = d.enabled ? '전체 보관: 격리 중 ' + (c.QUARANTINED || 0) + '건, 복구됨 ' + (c.RELEASED || 0) + '건' : '격리함이 꺼져 있습니다(gateway.quarantine.enabled)';\n" +
-                "  document.getElementById('badgeQuarantine').textContent = (c.QUARANTINED || 0) ? ' (' + c.QUARANTINED + ')' : '';\n" +
+                "  document.getElementById('qCounts').textContent = d.enabled ? '전체 보관: 보류 중 ' + (c.HELD || 0) + '건, 사본 ' + (c.QUARANTINED || 0) + '건, 복구됨 ' + (c.RELEASED || 0) + '건' : '격리함이 꺼져 있습니다(gateway.quarantine.enabled)';\n" +
+                "  document.getElementById('badgeQuarantine').textContent = (c.HELD || 0) ? ' (보류 ' + c.HELD + ')' : '';\n" +
                 "  window.qById = {}; d.rows.forEach(r => { window.qById[r.id] = r; });\n" +
                 "  document.querySelector('#qTable tbody').innerHTML = d.rows.map(r => '<tr><td>' + r.id + '</td><td>' + r.at + '</td><td>' + escapeHtml(r.from) + '</td><td>' + escapeHtml(r.rcpt) + '</td><td>' + escapeHtml(r.subject) + '</td><td>' + r.score + '</td><td>' + escapeHtml(r.filter) + ': ' + escapeHtml(r.reason || '') + '</td><td>' + (Q_STATUS[r.status] || r.status) + '</td><td>' +\n" +
-                "    (r.hasEml ? '<button data-q=\"view\" data-id=\"' + r.id + '\">보기</button> <button data-q=\"release\" data-id=\"' + r.id + '\">복구</button> <button data-q=\"releasewl\" data-id=\"' + r.id + '\">복구+허용</button> <button data-q=\"eml\" data-id=\"' + r.id + '\" style=\"background:#6b7280\">원문</button> ' : '<span style=\"color:#888\">원문 없음</span> ') +\n" +
+                "    (r.hasEml ? '<button data-q=\"view\" data-id=\"' + r.id + '\">보기</button> <button data-q=\"release\" data-id=\"' + r.id + '\">' + (r.status === 'HELD' ? '전달' : '복구') + '</button> <button data-q=\"releasewl\" data-id=\"' + r.id + '\">' + (r.status === 'HELD' ? '전달+허용' : '복구+허용') + '</button> <button data-q=\"eml\" data-id=\"' + r.id + '\" style=\"background:#6b7280\">원문</button> ' : '<span style=\"color:#888\">원문 없음</span> ') +\n" +
                 "    '<button class=\"danger\" data-q=\"del\" data-id=\"' + r.id + '\">삭제</button></td></tr>').join('') || '<tr><td colspan=\"9\">보관된 메일이 없습니다</td></tr>';\n" +
                 "}\n" +
                 "document.querySelector('#qTable tbody').addEventListener('click', async (e) => {\n" +

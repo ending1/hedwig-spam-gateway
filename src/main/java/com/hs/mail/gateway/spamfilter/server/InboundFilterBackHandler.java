@@ -17,13 +17,31 @@ class InboundFilterBackHandler extends SimpleChannelInboundHandler<String> {
     private final Channel frontChannel;
     private final ProxySession session;
 
+    /** 이 핸들러가 붙은 backend 연결의 세대(교체되면 옛 연결의 늦은 응답과 종료는 무시한다). */
+    private final int generation;
+
     InboundFilterBackHandler(Channel frontChannel, ProxySession session) {
+        this(frontChannel, session, 0);
+    }
+
+    InboundFilterBackHandler(Channel frontChannel, ProxySession session, int generation) {
         this.frontChannel = frontChannel;
         this.session = session;
+        this.generation = generation;
     }
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, String line) {
+        if (generation != session.backendGeneration) {
+            return;
+        }
+        if (session.suppressReplies > 0) {
+            // 보류 후 backend를 다시 연결하며 재전송한 EHLO의 응답(배너, EHLO 응답)은 client가 이미 받은 것이므로 버린다.
+            if (line.length() < 4 || line.charAt(3) != '-') {
+                session.suppressReplies--;
+            }
+            return;
+        }
         if (session.dataPending && line.startsWith("354")) {
             session.dataPending = false;
             session.bufferingData = true;
@@ -35,6 +53,9 @@ class InboundFilterBackHandler extends SimpleChannelInboundHandler<String> {
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) {
+        if (generation != session.backendGeneration) {
+            return; // 보류로 일부러 교체한 옛 연결이므로 client 연결은 유지한다
+        }
         if (frontChannel.isActive()) {
             frontChannel.close();
         }

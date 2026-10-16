@@ -89,6 +89,51 @@ class QuarantineServiceTest {
     }
 
     @Test
+    void 보류_보관은_원문까지_저장된_경우에만_성공하고_한도와_크기_초과_꺼짐에서는_실패한다() throws Exception {
+        QuarantineService s = service("qh1");
+        assertEquals(-1, s.storeHeld("1.1.1.1", "a@b.example", Arrays.asList("c@d.example"), "x", 0.9, "RULE", "r", "", message()),
+                "보류 설정이 꺼져 있으면 보류하지 않는다");
+
+        props.getQuarantine().setHoldEnabled(true);
+        long id = s.storeHeld("1.1.1.1", "a@b.example", Arrays.asList("c@d.example"), "제목", 0.9, "RULE", "r", "", message());
+        assertTrue(id > 0);
+        assertEquals("HELD", s.get(id).status);
+        assertTrue(Files.exists(dir.resolve(id + ".eml")), "원문이 저장된 뒤에만 보류");
+
+        props.getQuarantine().setHoldMaxCount(1);
+        assertEquals(-1, s.storeHeld("1.1.1.1", "a@b.example", Arrays.asList("c@d.example"), "제목2", 0.9, "RULE", "r", "", message()),
+                "보류 개수 한도에 도달하면 보류하지 않고 전달하게 한다");
+        assertEquals(1, s.search("2000-01-01", "2999-12-31", "HELD", "ALL", 50).size(), "실패한 시도는 행을 남기지 않는다");
+
+        props.getQuarantine().setHoldMaxCount(2000);
+        props.getQuarantine().setMaxMessageBytes(50);
+        assertEquals(-1, s.storeHeld("1.1.1.1", "a@b.example", Arrays.asList("c@d.example"), "큰 메일", 0.9, "RULE", "r", "", message()),
+                "원문을 보관하지 못하는 큰 메일은 보류하지 않는다");
+        assertEquals(1, s.search("2000-01-01", "2999-12-31", "ALL", "ALL", 50).size(), "큰 메일 시도의 행도 지운다");
+        props.getQuarantine().setMaxMessageBytes(5 * 1024 * 1024);
+        props.getQuarantine().setHoldEnabled(false);
+    }
+
+    @Test
+    void 보류_메일은_보류_보관일수를_따르고_복구하면_RELEASED가_된다() throws Exception {
+        QuarantineService s = service("qh2");
+        props.getQuarantine().setHoldEnabled(true);
+        long held = s.storeHeld("1.1.1.1", "a@b.example", Arrays.asList("c@d.example"), "보류", 0.9, "RULE", "r", "", message());
+        long copy = store(s);
+        JdbcTemplate jdbc = new JdbcTemplate(new DriverManagerDataSource("jdbc:h2:mem:qh2;MODE=MySQL;DB_CLOSE_DELAY=-1", "sa", ""));
+        jdbc.update("UPDATE hw_quarantine SET received_day = '2020-01-01' WHERE id IN (?, ?)", held, copy);
+
+        // 사본은 1일, 보류는 0이면 삭제하지 않는다
+        assertEquals(1, s.purgeOlderThan(1, 0));
+        assertNull(s.get(copy));
+        assertEquals("HELD", s.get(held).status, "보류 메일은 보류 보관일수가 0이면 지워지지 않는다");
+        // 보류 보관일수를 주면 그때 삭제된다
+        assertEquals(1, s.purgeOlderThan(0, 5));
+        assertNull(s.get(held));
+        props.getQuarantine().setHoldEnabled(false);
+    }
+
+    @Test
     void 인코딩_없이_UTF8로_온_헤더도_미리보기에서_깨지지_않는다() throws Exception {
         QuarantineService s = service("q0");
         long id = s.doStore("1.1.1.1", "a@b.example", Arrays.asList("c@d.example"), "[격리함 시험] 총알 대출", 1, "RULE", "r", "",

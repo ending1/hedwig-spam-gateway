@@ -149,6 +149,26 @@ public class GatewayProperties {
         private int retentionDays = 14;
         /** 이보다 큰 메일은 보관하지 않는다(메타데이터만 남김). */
         private int maxMessageBytes = 5 * 1024 * 1024;
+        /**
+         * 보류(hold): 점수가 holdMinScore 이상인 스팸은 받는 사람에게 전달하지 않고 격리함에만 둔다(발신자에게는 250으로 수락).
+         * 관리자가 복구해야 전달된다. 격리함 보관에 실패하면 메일을 잃지 않도록 평소대로 태그를 붙여 전달한다.
+         */
+        private boolean holdEnabled = false;
+        /** 보류할 최소 점수(0~1). 룰 합계는 10점 만점으로 정규화되고 LLM은 확신도다. */
+        private double holdMinScore = 0.8;
+        /** 보류된 메일의 보관 일수(0이면 자동 삭제 안 함). 지나면 영구 삭제되므로 retentionDays보다 길게 둔다. */
+        private int holdRetentionDays = 30;
+        /** 보류 메일이 이 개수 이상 쌓이면 더 보류하지 않고 평소대로 전달한다(디스크 보호). */
+        private int holdMaxCount = 2000;
+
+        public boolean isHoldEnabled() { return holdEnabled; }
+        public void setHoldEnabled(boolean holdEnabled) { this.holdEnabled = holdEnabled; }
+        public double getHoldMinScore() { return holdMinScore; }
+        public void setHoldMinScore(double holdMinScore) { this.holdMinScore = holdMinScore; }
+        public int getHoldRetentionDays() { return holdRetentionDays; }
+        public void setHoldRetentionDays(int holdRetentionDays) { this.holdRetentionDays = holdRetentionDays; }
+        public int getHoldMaxCount() { return holdMaxCount; }
+        public void setHoldMaxCount(int holdMaxCount) { this.holdMaxCount = holdMaxCount; }
 
         public boolean isEnabled() { return enabled; }
         public void setEnabled(boolean enabled) { this.enabled = enabled; }

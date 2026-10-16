@@ -54,6 +54,8 @@ public class QuarantineService {
     private static final Logger log = LoggerFactory.getLogger(QuarantineService.class);
     private static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("yyyy-MM-dd");
     public static final String QUARANTINED = "QUARANTINED";
+    /** 보류: 받는 사람에게 전달하지 않고 격리함에만 있는 메일(복구해야 전달됨). */
+    public static final String HELD = "HELD";
     public static final String RELEASED = "RELEASED";
 
     public static final class Entry {
@@ -124,6 +126,37 @@ public class QuarantineService {
         return config.isEnabled();
     }
 
+    /** 보류 사용 여부(격리함이 켜져 있고 hold-enabled일 때). */
+    public boolean isHoldEnabled() {
+        return config.isEnabled() && config.isHoldEnabled();
+    }
+
+    public double getHoldMinScore() {
+        return config.getHoldMinScore();
+    }
+
+    /**
+     * 보류용 보관(동기): 원문 파일까지 안전하게 저장된 경우에만 id를 돌려준다. 실패하거나 한도(크기, 보류 개수)를 넘으면
+     * -1을 돌려주며, 호출한 쪽은 메일을 잃지 않도록 평소대로 전달해야 한다.
+     */
+    public long storeHeld(String clientIp, String mailFrom, List<String> rcpts, String subject, double score,
+                          String filter, String reason, String auth, List<String> lines) {
+        if (!isHoldEnabled()) {
+            return -1;
+        }
+        try {
+            Long held = countByStatus().get(HELD);
+            if (held != null && held >= config.getHoldMaxCount()) {
+                log.warn("보류 메일이 {}건으로 한도에 도달해 더 보류하지 않고 전달합니다", held);
+                return -1;
+            }
+        } catch (RuntimeException e) {
+            log.warn("보류 개수 확인 실패, 보류하지 않고 전달합니다: {}", e.getMessage());
+            return -1;
+        }
+        return doStore(clientIp, mailFrom, rcpts, subject, score, filter, reason, auth, lines, HELD);
+    }
+
     /** 스팸 판정된 메일을 격리함에 넣는다(비동기, 실패해도 메일 처리에는 영향 없음). lines는 CRLF 없는 DATA 줄. */
     public void store(String clientIp, String mailFrom, List<String> rcpts, String subject, double score, String filter,
                       String reason, String auth, List<String> lines) {
@@ -140,6 +173,12 @@ public class QuarantineService {
 
     long doStore(String clientIp, String mailFrom, List<String> rcpts, String subject, double score, String filter,
                  String reason, String auth, List<String> lines) {
+        return doStore(clientIp, mailFrom, rcpts, subject, score, filter, reason, auth, lines, QUARANTINED);
+    }
+
+    long doStore(String clientIp, String mailFrom, List<String> rcpts, String subject, double score, String filter,
+                 String reason, String auth, List<String> lines, String status) {
+        long insertedId = -1;
         try {
             byte[] eml = toBytes(lines);
             boolean tooBig = eml.length > config.getMaxMessageBytes();
@@ -158,13 +197,19 @@ public class QuarantineService {
                 ps.setString(8, cut(filter, 12));
                 ps.setString(9, cut(reason, 500));
                 ps.setString(10, cut(auth, 40));
-                ps.setString(11, QUARANTINED);
+                ps.setString(11, status);
                 ps.setLong(12, eml.length);
                 return ps;
             }, kh);
             long id = kh.getKey().longValue();
+            insertedId = id;
             if (tooBig) {
                 log.info("격리함 #{}: 메일이 {}바이트로 한도를 넘어 원문은 보관하지 않습니다", id, eml.length);
+                if (HELD.equals(status)) {
+                    // 원문 없이는 보류할 수 없다 - 행을 지우고 호출한 쪽이 평소대로 전달하게 한다.
+                    jdbc.update(sql.get("quarantine.delete"), id);
+                    return -1;
+                }
                 return id;
             }
             String fileName = id + ".eml";
@@ -174,7 +219,14 @@ public class QuarantineService {
             jdbc.update(sql.get("quarantine.update"), fileName, (long) eml.length, id);
             return id;
         } catch (Exception e) {
-            log.warn("격리함 보관 실패(메일은 정상 전달됨): {}", e.getMessage());
+            log.warn("격리함 보관 실패({}): {}", HELD.equals(status) ? "보류하지 않고 전달합니다" : "메일은 정상 전달됨", e.getMessage());
+            if (HELD.equals(status) && insertedId > 0) {
+                try {
+                    jdbc.update(sql.get("quarantine.delete"), insertedId);
+                } catch (RuntimeException ignored) {
+                    // 행이 남아도 원문이 없는 항목일 뿐이다
+                }
+            }
             return -1;
         }
     }
@@ -309,7 +361,7 @@ public class QuarantineService {
         jdbc.update(sql.get("quarantine.setStatus"), RELEASED, id);
         audit.record(actor, "QUARANTINE", "QUARANTINE_RELEASE", "#" + id, e.mailFrom + " / " + e.subject,
                 accepted + "명에게 재전달");
-        return accepted + "명에게 다시 전달했습니다.";
+        return HELD.equals(e.status) ? accepted + "명에게 전달했습니다(보류 해제)." : accepted + "명에게 다시 전달했습니다.";
     }
 
     /** Hedwig 백엔드에 SMTP로 직접 전달. 수신자가 하나도 수락되지 않으면 예외. */
@@ -382,18 +434,26 @@ public class QuarantineService {
 
     @Scheduled(cron = "0 50 3 * * *")
     public void purge() {
-        purgeOlderThan(config.getRetentionDays());
+        purgeOlderThan(config.getRetentionDays(), config.getHoldRetentionDays());
     }
 
     int purgeOlderThan(int days) {
-        if (days <= 0 || !config.isEnabled()) {
+        return purgeOlderThan(days, config.getHoldRetentionDays());
+    }
+
+    /** 사본(QUARANTINED/RELEASED)은 days일, 보류(HELD)는 holdDays일이 지나면 삭제한다. 각각 0 이하이면 삭제하지 않는다. */
+    int purgeOlderThan(int days, int holdDays) {
+        if ((days <= 0 && holdDays <= 0) || !config.isEnabled()) {
             return 0;
         }
-        String cutoff = LocalDate.now(ZoneId.systemDefault()).minusDays(days).format(DAY);
+        final String never = "0000-01-01";
+        String copyCutoff = days > 0 ? LocalDate.now(ZoneId.systemDefault()).minusDays(days).format(DAY) : never;
+        String holdCutoff = holdDays > 0 ? LocalDate.now(ZoneId.systemDefault()).minusDays(holdDays).format(DAY) : never;
+        String cutoff = copyCutoff;
         final List<Object[]> expired = new ArrayList<>();
         jdbc.query(sql.get("quarantine.findExpired"), rs -> {
             expired.add(new Object[] {rs.getLong(1), rs.getString(2)});
-        }, cutoff);
+        }, holdCutoff, copyCutoff);
         for (Object[] row : expired) {
             removeFile((String) row[1]);
             jdbc.update(sql.get("quarantine.delete"), row[0]);

@@ -20,6 +20,10 @@ class ProxySession {
     boolean forceSpamTag;
     /** EHLO/HELO로 받은 이름(연결 동안 유지). SPF의 HELO 검사와 반송 메일(MAIL FROM:<>)에 쓴다. */
     String helo = "";
+    /** 현재 유효한 backend 연결의 세대. 보류로 backend를 교체하면 올라가고, 옛 연결의 응답/종료는 무시된다. */
+    int backendGeneration;
+    /** backend 교체 직후 재전송한 EHLO에 대한 응답(배너 1 + EHLO 1)처럼 client에 전달하지 말고 버릴 응답 개수. */
+    int suppressReplies;
     /** 이번 메일의 SPF/DKIM/DMARC 결과(검증하지 않았으면 null). */
     com.hs.mail.gateway.auth.AuthResult authResult;
 

@@ -56,8 +56,9 @@ public class QuarantineController {
             return error(HttpStatus.UNAUTHORIZED, "invalid X-Admin-Key");
         }
         String st = status == null ? "ALL" : status.trim().toUpperCase();
-        if (!st.equals("ALL") && !st.equals(QuarantineService.QUARANTINED) && !st.equals(QuarantineService.RELEASED)) {
-            return error(HttpStatus.BAD_REQUEST, "status: ALL|QUARANTINED|RELEASED");
+        if (!st.equals("ALL") && !st.equals(QuarantineService.QUARANTINED) && !st.equals(QuarantineService.RELEASED)
+                && !st.equals(QuarantineService.HELD)) {
+            return error(HttpStatus.BAD_REQUEST, "status: ALL|HELD|QUARANTINED|RELEASED");
         }
         StatsPeriod p = StatsPeriod.of(from, to, period == null ? "last30d" : period, LocalDate.now());
         String like = sender == null || sender.trim().isEmpty() ? "ALL" : "%" + sender.trim().replace("%", "") + "%";
