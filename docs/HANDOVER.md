@@ -116,3 +116,11 @@ gateway:
 - **전달은 바꾸지 않는 "사본" 방식**이다. 받는 사람에게 전달하지 않고 붙잡는 보류(hold)는 구현하지 않았다. 이유: 게이트웨이가 DATA를 붙잡은 뒤 backend(Hedwig)는 이미 DATA 대기 상태라, 거절(550)하거나 폐기하려면 backend 연결을 정리하고 같은 클라이언트 연결의 이후 명령을 위해 backend를 다시 연결해 상태를 맞추는 처리가 필요하다. 오탐 시 메일 손실 위험도 있어 정책 결정(어떤 점수부터 보류할지)이 먼저다.
 - 복구는 Hedwig 백엔드(`gateway.backend`)로 SMTP 직접 전달이라 평소 검사/스팸 태그를 거치지 않고, 이미 스팸함으로 간 원본과 별개로 한 통 더 도착한다. 시험 시 수신자는 실제 존재하는 계정이어야 한다(없으면 Hedwig가 거절).
 - 시험으로 `t11111t@egov.handysoft.co.kr`에 `[격리함 시험]` 제목의 가상 메일 2통(스팸 태그 1, 복구 1)을 보냈다.
+
+## 스팸 보류 hold (2026-10-16 추가)
+- 위 격리함 절의 "보류는 구현하지 않았다"는 이후 구현으로 바뀌었다. `gateway.quarantine.hold-enabled: true`이면 `InboundFilterFrontHandler.deliverBufferedData`가 점수 ≥ `hold-min-score`인 스팸을 `holdOrDeliver`로 보낸다: classifierExecutor에서 `QuarantineService.storeHeld`(원문 파일까지 저장 확인) → 성공 시 `holdMessage`.
+- **프로토콜 처리**: 게이트웨이가 DATA를 붙잡은 시점에 backend(Hedwig)는 DATA 대기 상태다. 보류하면 발신자에게 `250 2.0.0 Ok: queued`를 보내고 backend 연결을 닫아(Hedwig는 마침표 없는 DATA를 버린다) 새 연결로 교체한다. 같은 client 연결의 이후 명령을 위해 새 연결에 `EHLO <client 이름>`을 다시 보내며, 그 응답(배너 + EHLO 응답 2건)은 `ProxySession.suppressReplies`로 client에 전달하지 않는다. 옛 연결의 늦은 응답/종료는 `backendGeneration`으로 무시한다.
+- **안전 원칙**: 저장이 확인되지 않으면 절대 보류하지 않고 평소대로 스팸 태그로 전달한다(메일 손실 방지). 보류 개수 한도(`hold-max-count`)를 넘어도 전달한다.
+- 보류 메일은 `hold-retention-days`(기본 30일)가 지나면 **영구 삭제**된다. 운영에서는 관리자가 주기적으로 확인하는 절차(또는 알림)를 정해야 한다. 상태: HELD(보류 중, 미전달) / QUARANTINED(사본, 이미 전달됨) / RELEASED.
+- egov 설정: `hold-enabled: true`, `hold-min-score: 0.8`. 끄려면 `hold-enabled: false` 후 재기동.
+- 통합 시험은 연결을 여러 번 받는 fake Hedwig(`MultiHedwigServer`, InboundFilterFrontHandlerTest 안)로 한다.

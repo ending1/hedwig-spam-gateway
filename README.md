@@ -139,9 +139,9 @@ curl -X DELETE http://localhost:8090/admin/spam-rules/42
 - 한계: DKIM은 게이트웨이가 줄 단위 문자열로 받은 메일 기준이라 8bit 원문이 깨진 메일(U+FFFD)은 검증하지 않고 neutral로 둔다. SPF의 `ptr` 메커니즘은 일치하지 않는 것으로 처리한다. DMARC 조직 도메인은 자주 쓰는 다단계 접미사(.co.kr 등)만 내장했고 pct 샘플링은 적용하지 않는다. 메일링 리스트·전달(forward) 메일은 정당해도 DMARC가 실패할 수 있으니, 도입 초기에는 통계를 보며 가중치를 조정한다.
 
 ### 8-10. 격리함 (스팸 판정 메일 보관·열람·복구)
-- 스팸으로 판정된 메일의 **사본**을 원문(EML) 파일과 `hw_quarantine` 메타데이터로 보관한다. 메일 전달은 바꾸지 않는다(스팸 태그를 붙여 평소처럼 Hedwig로 전달되고, 격리함은 관리자 검토용 사본이다). 실제로 받는 사람에게 전달하지 않고 붙잡아 두는 "보류(hold)"는 아직 없다.
+- 스팸으로 판정된 메일을 원문(EML) 파일과 `hw_quarantine` 메타데이터로 보관한다. 두 가지 방식이 있다. **사본**(기본): 스팸 태그를 붙여 평소처럼 전달하고 관리자 검토용 복사본만 둔다. **보류(hold)**: 점수가 `hold-min-score`(기본 0.8, 룰 합계 10점 만점 기준 8점) 이상인 확실한 스팸은 받는 사람에게 전달하지 않고 격리함에만 두며 발신자에게는 `250`으로 수락 응답한다. 보류 메일은 관리자가 **전달**해야 도착한다. 격리함 보관에 실패하거나 한도(크기, 보류 개수)를 넘으면 메일을 잃지 않도록 평소대로 태그를 붙여 전달한다.
 - 대시보드 "격리함" 탭: 기간·상태·발신자 조회, **보기**(디코딩한 헤더·본문 텍스트, 첨부 이름), **복구**(스팸 태그 없이 수신자에게 한 통 더 전달, 복구+발신자 화이트리스트 추가 선택), 원문(EML) 받기, 삭제. 원문은 첨부 파일로만 내려주고 미리보기는 텍스트만 보여 메일 안의 스크립트가 관리자 화면에서 실행되지 않는다.
-- 설정: `gateway.quarantine.enabled`(기본 꺼짐), `dir`, `max-message-bytes`(기본 5MB, 초과 메일은 메타데이터만). 보관 기간은 환경변수 `GATEWAY_QUARANTINE_RETENTIONDAYS`(기본 14일, 0이면 삭제 안 함)이며 매일 새벽 자동 정리한다. 복구·삭제는 변경 이력(`hw_admin_audit`)에 남는다.
+- 설정: `gateway.quarantine.enabled`(기본 꺼짐), `dir`, `max-message-bytes`(기본 5MB, 초과 메일은 메타데이터만), 보류는 `hold-enabled`(기본 꺼짐), `hold-min-score`, `hold-retention-days`(기본 30일, 0이면 자동 삭제 안 함), `hold-max-count`(기본 2000). 보관 기간은 환경변수 `GATEWAY_QUARANTINE_RETENTIONDAYS`(기본 14일, 0이면 삭제 안 함)이며 매일 새벽 자동 정리한다. 복구·삭제는 변경 이력(`hw_admin_audit`)에 남는다.
 - API: `GET /admin/quarantine`, `GET /admin/quarantine/{id}/preview`, `GET /admin/quarantine/{id}/eml`, `POST /admin/quarantine/{id}/release`, `DELETE /admin/quarantine/{id}`
 
 ### 8-11. 수신자 도메인 정책 (릴레이 차단)
