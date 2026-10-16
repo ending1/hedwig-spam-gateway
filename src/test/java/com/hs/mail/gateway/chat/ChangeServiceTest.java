@@ -54,7 +54,7 @@ class ChangeServiceTest {
 
         String msg = s.apply(p.id, "admin");
 
-        assertTrue(msg.contains("추가했습니다"), msg);
+        assertTrue(msg.contains("추가를 완료"), msg);
         assertEquals(before + 1, rules.list().size());
         SpamRuleEntry added = rules.list().get(rules.list().size() - 1);
         assertEquals("챗봇테스트키워드", added.getPattern());

@@ -113,7 +113,7 @@ public class ChangeService {
                 p = proposeWeight(t, value, actor);
                 break;
             default:
-                throw new ChangeException("어떤 변경인지 이해하지 못했습니다. 예: '비아그라 키워드 룰 가중치 3으로 추가해줘', '20번 룰 꺼줘', '37번 룰 가중치 1.5로'");
+                throw new ChangeException("챗에서는 룰 추가, 켜기/끄기, 가중치 변경만 요청할 수 있습니다(삭제나 다른 설정은 룰 관리 탭에서 직접 하세요). 예: '비아그라 키워드 룰 가중치 3으로 추가해줘', '20번 룰 꺼줘', '37번 룰 가중치 1.5로'");
         }
         while (proposals.size() >= MAX_PROPOSALS) {
             Iterator<String> it = proposals.keySet().iterator();
@@ -187,7 +187,7 @@ public class ChangeService {
             SpamRuleEntry created = rules.add(new SpamRuleEntry(null, SpamRuleEntry.RuleType.KEYWORD, p.pattern, p.weight,
                     true, "AI 챗 제안(" + actor + ")"));
             audit.record(actor, "CHAT", p.action, "#" + created.getId(), null, p.after);
-            result = "룰 #" + created.getId() + "를 추가했습니다.";
+            result = "룰 #" + created.getId() + " 추가를 완료했습니다.";
         } else {
             SpamRuleEntry cur = findById(p.ruleId);
             if (cur == null) {
