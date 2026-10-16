@@ -234,7 +234,10 @@ public class QuarantineService {
         byte[] raw = readEml(id);
         Map<String, Object> m = new LinkedHashMap<>();
         try {
-            MimeMessage msg = new MimeMessage(Session.getInstance(new Properties()), new ByteArrayInputStream(raw));
+            // 원문 헤더가 인코딩 없이 UTF-8로 들어온 메일도 깨지지 않게 읽는다.
+            Properties mailProps = new Properties();
+            mailProps.setProperty("mail.mime.allowutf8", "true");
+            MimeMessage msg = new MimeMessage(Session.getInstance(mailProps), new ByteArrayInputStream(raw));
             m.put("from", msg.getHeader("From", ", "));
             m.put("to", msg.getHeader("To", ", "));
             m.put("subject", msg.getSubject());

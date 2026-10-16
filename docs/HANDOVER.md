@@ -110,3 +110,9 @@ gateway:
 - **조치**: `RecipientPolicy` + `InboundFilterFrontHandler.handleRcptTo` 맨 앞에서 검사. `gateway.recipient.local-domains`에 없는 도메인은 `gateway.recipient.relay-networks` 밖의 접속에 `554 5.7.1 Relay access denied`. 거부는 이벤트 로그에 `REJECTED/RELAY`로 남는다. 목록이 비면 정책이 꺼진 것과 같다(기존 동작).
 - **egov 설정**: `local-domains: [.handysoft.co.kr]`(egov/mars2/lucy3 등 하위 도메인, 정확히 `handysoft.co.kr`은 제외 - 이 서버가 받는 도메인이 아니고 실제 회사 MX는 다른 서버), `relay-networks: [127.0.0.0/8]`(Hedwig mynetworks와 동일, 같은 서버의 그룹웨어 앱이 localhost:25로 외부에 보내는 흐름 유지). 운영 반영 시 실제 수신 도메인 목록과 내부 앱/장비의 발송 대역을 반드시 확인할 것(빠지면 정상 메일이 554로 거절된다).
 - **한계**: 없는 사용자 검증은 Hedwig가 한다(550). 게이트웨이는 그레이리스팅을 RCPT 검증보다 먼저 하므로 없는 사용자에게도 첫 접촉은 450이 나간다.
+
+## 격리함 (2026-10-16 추가)
+- `QuarantineService`(보관·미리보기·복구·삭제·정리), `QuarantineController`(`/admin/quarantine/**`), 훅은 `InboundFilterFrontHandler.deliverBufferedData`(스팸 판정 시 사본 비동기 저장). 테이블 `hw_quarantine`(Oracle 생성 완료), 원문은 `gateway.quarantine.dir`(egov: `/home/egov/hedwig_spam_prod/data/quarantine`, 권한 700).
+- **전달은 바꾸지 않는 "사본" 방식**이다. 받는 사람에게 전달하지 않고 붙잡는 보류(hold)는 구현하지 않았다. 이유: 게이트웨이가 DATA를 붙잡은 뒤 backend(Hedwig)는 이미 DATA 대기 상태라, 거절(550)하거나 폐기하려면 backend 연결을 정리하고 같은 클라이언트 연결의 이후 명령을 위해 backend를 다시 연결해 상태를 맞추는 처리가 필요하다. 오탐 시 메일 손실 위험도 있어 정책 결정(어떤 점수부터 보류할지)이 먼저다.
+- 복구는 Hedwig 백엔드(`gateway.backend`)로 SMTP 직접 전달이라 평소 검사/스팸 태그를 거치지 않고, 이미 스팸함으로 간 원본과 별개로 한 통 더 도착한다. 시험 시 수신자는 실제 존재하는 계정이어야 한다(없으면 Hedwig가 거절).
+- 시험으로 `t11111t@egov.handysoft.co.kr`에 `[격리함 시험]` 제목의 가상 메일 2통(스팸 태그 1, 복구 1)을 보냈다.

@@ -89,6 +89,18 @@ class QuarantineServiceTest {
     }
 
     @Test
+    void 인코딩_없이_UTF8로_온_헤더도_미리보기에서_깨지지_않는다() throws Exception {
+        QuarantineService s = service("q0");
+        long id = s.doStore("1.1.1.1", "a@b.example", Arrays.asList("c@d.example"), "[격리함 시험] 총알 대출", 1, "RULE", "r", "",
+                new ArrayList<>(Arrays.asList("From: 시험 <a@b.example>", "To: c@d.example", "Subject: [격리함 시험] 총알 대출",
+                        "Content-Type: text/plain; charset=UTF-8", "", "본문입니다")));
+        Map<String, Object> p = s.preview(id);
+        assertEquals("[격리함 시험] 총알 대출", p.get("subject"));
+        assertTrue(String.valueOf(p.get("from")).contains("시험"), String.valueOf(p.get("from")));
+        assertTrue(String.valueOf(p.get("text")).contains("본문입니다"));
+    }
+
+    @Test
     void 복구하면_Hedwig로_스팸_태그_없이_SMTP로_다시_전달되고_이력이_남는다() throws Exception {
         QuarantineService s = service("q2");
         long id = store(s);
