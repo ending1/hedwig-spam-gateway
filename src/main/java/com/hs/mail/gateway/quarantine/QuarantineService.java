@@ -250,6 +250,12 @@ public class QuarantineService {
         return rows.isEmpty() ? null : rows.get(0);
     }
 
+    /** 받은 날이 day(yyyy-MM-dd)보다 이른 보류 중 메일 수. */
+    public long countHeldBefore(String day) {
+        Long n = jdbc.queryForObject(sql.get("quarantine.countHeldBefore"), Long.class, day);
+        return n == null ? 0 : n;
+    }
+
     public Map<String, Long> countByStatus() {
         Map<String, Long> m = new LinkedHashMap<>();
         jdbc.query(sql.get("quarantine.countByStatus"), rs -> {
@@ -365,7 +371,7 @@ public class QuarantineService {
     }
 
     /** Hedwig 백엔드에 SMTP로 직접 전달. 수신자가 하나도 수락되지 않으면 예외. */
-    int deliver(String mailFrom, List<String> rcpts, String message) throws QuarantineException {
+    public int deliver(String mailFrom, List<String> rcpts, String message) throws QuarantineException {
         GatewayProperties.Backend backend = properties.getBackend();
         try (Socket s = new Socket()) {
             s.connect(new java.net.InetSocketAddress(backend.getHost(), backend.getPort()), 5000);

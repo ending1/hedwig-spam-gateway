@@ -132,6 +132,7 @@ public class AdminDashboardController {
                 "    <select id=\"qStatus\"><option value=\"ALL\">상태 전체</option><option value=\"HELD\">보류 중(미전달)</option><option value=\"QUARANTINED\">사본(전달됨)</option><option value=\"RELEASED\">복구됨</option></select>\n" +
                 "    <select id=\"qPeriod\"><option value=\"today\">오늘</option><option value=\"last7d\">최근 7일</option><option value=\"last30d\" selected>최근 30일</option></select>\n" +
                 "    <input id=\"qSender\" placeholder=\"발신자 일부\" size=\"22\"> <button id=\"qFind\">조회</button> <span id=\"qCounts\" style=\"color:#555\"></span>\n" +
+                "    <span style=\"margin-left:auto\"><button type=\"button\" id=\"qDigestPreview\" style=\"background:#6b7280\">일일 요약 미리보기</button> <button type=\"button\" id=\"qDigestSend\" style=\"background:#16a34a\">요약 메일 지금 보내기</button></span>\n" +
                 "  </form>\n" +
                 "  <table id=\"qTable\"><thead><tr><th>ID</th><th>시각</th><th>발신자</th><th>수신자</th><th>제목</th><th>점수</th><th>판정 근거</th><th>상태</th><th></th></tr></thead><tbody></tbody></table>\n" +
                 "  <div id=\"qPreviewWrap\" style=\"display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:1000;align-items:center;justify-content:center\"><div id=\"qPreviewBox\" style=\"background:white;padding:1.2rem;border-radius:10px;max-width:760px;width:92%;max-height:84vh;overflow:auto\"></div></div>\n" +
@@ -322,6 +323,18 @@ public class AdminDashboardController {
                 "    if (!confirm('이 메일을 격리함에서 삭제합니다(원문 파일도 지워지며 되돌릴 수 없습니다). 진행할까요?')) return;\n" +
                 "    await adminFetch('/admin/quarantine/' + id, { method: 'DELETE' }); loadQuarantine();\n" +
                 "  }\n" +
+                "});\n" +
+                "document.getElementById('qDigestPreview').addEventListener('click', async () => {\n" +
+                "  const res = await adminFetch('/admin/quarantine/digest/preview'); const d = await res.json();\n" +
+                "  const box = document.getElementById('qPreviewBox'); const wrap = document.getElementById('qPreviewWrap');\n" +
+                "  box.innerHTML = '<h3 style=\"margin-top:0\">일일 요약 메일 미리보기</h3><pre style=\"white-space:pre-wrap;background:#f9fafb;padding:0.6rem;border-radius:6px\">' + escapeHtml(res.ok ? d.text : (d.error || '불러오지 못했습니다')) + '</pre><button id=\"qClose\">닫기</button>';\n" +
+                "  wrap.style.display = 'flex'; wrap.onclick = (ev) => { if (ev.target === wrap) wrap.style.display = 'none'; };\n" +
+                "  document.getElementById('qClose').onclick = () => { wrap.style.display = 'none'; };\n" +
+                "});\n" +
+                "document.getElementById('qDigestSend').addEventListener('click', async () => {\n" +
+                "  if (!confirm('보류 요약 메일을 설정된 관리자 수신자에게 지금 보냅니다. 진행할까요?')) return;\n" +
+                "  const res = await adminFetch('/admin/quarantine/digest/send', { method: 'POST' }); const d = await res.json();\n" +
+                "  alert(res.ok ? d.message : '보내지 못했습니다: ' + d.error);\n" +
                 "});\n" +
                 "document.getElementById('qFind').addEventListener('click', loadQuarantine);\n" +
                 "document.getElementById('qStatus').addEventListener('change', loadQuarantine);\n" +

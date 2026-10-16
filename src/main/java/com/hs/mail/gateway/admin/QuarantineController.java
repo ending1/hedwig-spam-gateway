@@ -35,11 +35,14 @@ public class QuarantineController {
     private static final DateTimeFormatter TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").withZone(ZoneId.systemDefault());
 
     private final QuarantineService quarantine;
+    private final com.hs.mail.gateway.quarantine.DigestService digest;
     private final MailListService mailList;
     private final AdminApiKeyGuard guard;
 
-    public QuarantineController(QuarantineService quarantine, MailListService mailList, AdminApiKeyGuard guard) {
+    public QuarantineController(QuarantineService quarantine, com.hs.mail.gateway.quarantine.DigestService digest,
+                                MailListService mailList, AdminApiKeyGuard guard) {
         this.quarantine = quarantine;
+        this.digest = digest;
         this.mailList = mailList;
         this.guard = guard;
     }
@@ -140,6 +143,33 @@ public class QuarantineController {
             return ResponseEntity.noContent().build();
         } catch (QuarantineService.QuarantineException e) {
             return error(HttpStatus.NOT_FOUND, e.getMessage());
+        }
+    }
+
+    /** 보류 요약 메일 미리보기(발송하지 않음). */
+    @GetMapping("/digest/preview")
+    public ResponseEntity<?> digestPreview(@RequestHeader(value = "X-Admin-Key", required = false) String key) {
+        if (!guard.isAuthorized(key)) {
+            return error(HttpStatus.UNAUTHORIZED, "invalid X-Admin-Key");
+        }
+        Map<String, Object> res = new LinkedHashMap<>();
+        String text = digest.preview();
+        res.put("text", text == null ? "보류 중인 메일이 없어 보낼 요약이 없습니다(gateway.digest.send-when-empty=false)." : text);
+        return ResponseEntity.ok(res);
+    }
+
+    /** 요약 메일을 지금 보낸다(보류 메일이 없어도 보낸다). 수신자는 gateway.digest.recipients. */
+    @PostMapping("/digest/send")
+    public ResponseEntity<?> digestSend(@RequestHeader(value = "X-Admin-Key", required = false) String key) {
+        if (!guard.isAuthorized(key)) {
+            return error(HttpStatus.UNAUTHORIZED, "invalid X-Admin-Key");
+        }
+        try {
+            Map<String, Object> res = new LinkedHashMap<>();
+            res.put("message", digest.send(guard.currentActor(), true));
+            return ResponseEntity.ok(res);
+        } catch (QuarantineService.QuarantineException e) {
+            return error(HttpStatus.CONFLICT, e.getMessage());
         }
     }
 

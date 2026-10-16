@@ -36,6 +36,7 @@ public class GatewayProperties {
     private final Auth auth = new Auth();
     private final Recipient recipient = new Recipient();
     private final Quarantine quarantine = new Quarantine();
+    private final Digest digest = new Digest();
     private final SpamReportOptions spamReport = new SpamReportOptions();
 
     public int getListenPort() {
@@ -136,6 +137,48 @@ public class GatewayProperties {
 
     public Quarantine getQuarantine() {
         return quarantine;
+    }
+
+    public Digest getDigest() {
+        return digest;
+    }
+
+    /**
+     * 보류 메일 일일 요약 메일. 관리자(recipients)에게 매일 cron 시각에 보류 중인 메일과 곧 삭제될 메일, 전날 처리 현황을
+     * 보낸다. Hedwig 백엔드로 직접 전달하므로 recipients는 Hedwig가 받는(우리 도메인) 주소여야 한다.
+     * 여러 게이트웨이 인스턴스가 같은 DB를 쓰면 인스턴스마다 보내므로 한 곳에서만 켠다.
+     */
+    public static class Digest {
+        private boolean enabled = false;
+        private java.util.List<String> recipients = new java.util.ArrayList<>();
+        /** 보내는 사람 주소(봉투와 From). 비우면 spam-gateway@<첫 수신자 도메인>. */
+        private String from = "";
+        /** 스프링 cron(초 분 시 일 월 요일). 기본 매일 09:00. */
+        private String cron = "0 0 9 * * *";
+        /** 요약 메일의 대시보드 안내 주소(예: https://host:18093/admin/dashboard). 비우면 안내 문구만. */
+        private String dashboardUrl = "";
+        /** 보류 메일이 없어도 현황만 보낼지(기본: 보류 메일이 있을 때만 발송). */
+        private boolean sendWhenEmpty = false;
+        private int maxItems = 20;
+        /** 보류 메일이 이 일수 안에 자동 삭제되면 별도로 경고한다. */
+        private int expiryWarnDays = 3;
+
+        public boolean isEnabled() { return enabled; }
+        public void setEnabled(boolean enabled) { this.enabled = enabled; }
+        public java.util.List<String> getRecipients() { return recipients; }
+        public void setRecipients(java.util.List<String> recipients) { this.recipients = recipients; }
+        public String getFrom() { return from; }
+        public void setFrom(String from) { this.from = from; }
+        public String getCron() { return cron; }
+        public void setCron(String cron) { this.cron = cron; }
+        public String getDashboardUrl() { return dashboardUrl; }
+        public void setDashboardUrl(String dashboardUrl) { this.dashboardUrl = dashboardUrl; }
+        public boolean isSendWhenEmpty() { return sendWhenEmpty; }
+        public void setSendWhenEmpty(boolean sendWhenEmpty) { this.sendWhenEmpty = sendWhenEmpty; }
+        public int getMaxItems() { return maxItems; }
+        public void setMaxItems(int maxItems) { this.maxItems = maxItems; }
+        public int getExpiryWarnDays() { return expiryWarnDays; }
+        public void setExpiryWarnDays(int expiryWarnDays) { this.expiryWarnDays = expiryWarnDays; }
     }
 
     /**
