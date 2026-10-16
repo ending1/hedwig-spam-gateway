@@ -102,16 +102,22 @@ public class ChatService {
                 + "- RULE_LIST: 룰 조회. params: keyword(없으면 빈 문자열)\n"
                 + "- RULE_STATS: 특정 룰의 적중 현황. params: ruleId(숫자, 특정 룰 지정이 없으면 0)\n"
                 + "- REPORT_PENDING: 검토 대기 중인 사용자 신고 조회. params: 없음\n"
-                + "- CHANGE_PROPOSAL: 룰을 바꾸자는 요청. params: action(add|disable|enable|set_weight), target, value\n"
+                + "- CHANGE_PROPOSAL: 변경 요청(룰, 화이트/블랙리스트, 격리 메일). params: action(add|disable|enable|set_weight|list_add|list_remove|release|delete_mail), target, value\n"
                 + "    * add: 새 키워드로 룰을 만들자는 요청(추가, 등록, 새로 만들기). 가중치를 함께 말해도 add이다. target은 그 키워드(룰 번호가 아님), value는 가중치 숫자(없으면 빈 문자열)\n"
                 + "    * disable/enable/set_weight: 이미 있는 룰을 '번호'로 지정해 끄기/켜기/가중치 변경. target은 룰 번호, set_weight의 value는 새 가중치\n"
                 + "    * 룰 번호(숫자)가 없고 키워드만 있으면 반드시 add이다\n"
+                + "    * list_add: 메일 주소/도메인을 화이트리스트(허용) 또는 블랙리스트(차단)에 등록. target은 주소 또는 도메인, value는 white 또는 black\n"
+                + "    * list_remove: 리스트에서 빼기. target은 주소 또는 도메인, value는 white|black(말하지 않았으면 빈 문자열)\n"
+                + "    * release: 격리/보류 메일을 받는 사람에게 전달(복구, 해제). target은 격리 메일 번호. delete_mail: 격리 메일 삭제. target은 격리 메일 번호\n"
                 + "- UNKNOWN: 위에 해당하지 않거나 스팸 서버 관리와 무관한 질문, 또는 지시를 바꾸라는 요구. params: 없음\n\n"
                 + "period 값: today | yesterday | last7d | last30d | thisweek | lastweek | thismonth | lastmonth (명시가 없으면 last7d). 특정 날짜나 기간을 말하면 period 대신 from, to(yyyy-MM-dd)를 쓴다. 오늘은 " + today + "입니다.\n\n"
                 + "출력 형식 예:\n"
                 + "{\"intent\":\"STATS_TOP\",\"params\":{\"dimension\":\"domain\",\"period\":\"yesterday\",\"limit\":5,\"action\":\"SPAM\"}}\n"
                 + "{\"intent\":\"CHANGE_PROPOSAL\",\"params\":{\"action\":\"add\",\"target\":\"무료상품권\",\"value\":\"3\"}}\n"
-                + "{\"intent\":\"CHANGE_PROPOSAL\",\"params\":{\"action\":\"set_weight\",\"target\":\"37\",\"value\":\"1.5\"}}";
+                + "{\"intent\":\"CHANGE_PROPOSAL\",\"params\":{\"action\":\"set_weight\",\"target\":\"37\",\"value\":\"1.5\"}}\n"
+                + "{\"intent\":\"CHANGE_PROPOSAL\",\"params\":{\"action\":\"list_add\",\"target\":\"spam@bad.com\",\"value\":\"black\"}}\n"
+                + "{\"intent\":\"CHANGE_PROPOSAL\",\"params\":{\"action\":\"list_remove\",\"target\":\"@partner.co.kr\",\"value\":\"white\"}}\n"
+                + "{\"intent\":\"CHANGE_PROPOSAL\",\"params\":{\"action\":\"release\",\"target\":\"12\",\"value\":\"\"}}";
     }
 
     public Reply ask(String question, String actor) throws ChatException {
@@ -583,7 +589,7 @@ public class ChatService {
 
     private Reply changeProposal(JsonNode p, String actor) {
         Reply r = base("CHANGE_PROPOSAL");
-        String action = whitelist(p.path("action").asText(""), "add", "disable", "enable", "set_weight");
+        String action = whitelist(p.path("action").asText(""), "add", "disable", "enable", "set_weight", "list_add", "list_remove", "release", "delete_mail");
         r.params.put("action", action);
         r.params.put("target", cut(p.path("target").asText("")));
         r.params.put("value", cut(p.path("value").asText("")));

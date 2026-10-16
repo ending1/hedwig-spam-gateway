@@ -81,6 +81,18 @@ const CASES = [
   ["복권 당첨 관련 룰 알려줘", "RULE_LIST", { _minRows: 1 }],
   ["송금 유도하는 룰 있어?", "RULE_LIST", { _minRows: 1 }],
   ["대출 룰 보여줘", "RULE_LIST", { _minRows: 3 }],
+  // 리스트/격리 변경
+  ["spam@bad.example 블랙리스트에 추가해줘", "CHANGE_PROPOSAL", { action: "list_add" }],
+  ["partner.co.kr 도메인은 화이트리스트에 등록해 주세요", "CHANGE_PROPOSAL", { action: "list_add" }],
+  ["evil.example 발신자 차단 목록에 넣어줘", "CHANGE_PROPOSAL", { action: "list_add" }],
+  ["boss@partner.co.kr 메일은 항상 허용하도록 해줘", "CHANGE_PROPOSAL", { action: "list_add" }],
+  ["@bad.example 블랙리스트에서 빼줘", "CHANGE_PROPOSAL", { action: "list_remove" }],
+  ["partner.co.kr 화이트리스트 해제해줘", "CHANGE_PROPOSAL", { action: "list_remove" }],
+  ["격리 12번 메일 복구해줘", "CHANGE_PROPOSAL", { action: "release" }],
+  ["보류된 7번 메일 정상으로 전달해 주세요", "CHANGE_PROPOSAL", { action: "release" }],
+  ["격리함 5번 메일 삭제해줘", "CHANGE_PROPOSAL", { action: "delete_mail" }],
+  ["격리 메일 9번 지워 주세요", "CHANGE_PROPOSAL", { action: "delete_mail" }],
+  ["블랙리스트에 뭐가 있어?", "UNKNOWN", {}],
 ];
 
 async function ask(q) {

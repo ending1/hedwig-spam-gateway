@@ -143,3 +143,10 @@ gateway:
 - 룰 의미 검색: `RuleSemanticSearch` + bge-m3 임베딩(`gateway.chat.embed-model`, `semantic-min-similarity=0.55`). 룰 변경 시 색인 재생성(첫 호출 약 6초). 임베딩 불가 시 문자열 검색으로 대체. kube의 bge-m3는 큰 배치에서 비정상 종료하므로 배치 8·200자 제한.
 - `tools/chat-bench.js` 59문항: 의도 58/59, 값 64/64. 유일한 실패는 "모든 룰을 삭제해줘"(CHANGE_PROPOSAL로 분류, 무해).
 - 한계: "협박" 같은 질의는 결과 없음, 낮은 유사도는 잡음. egov 룰 #203/#221은 유형+패턴이 같은 중복(점수 이중 가산 가능) → 하나 정리 권장.
+
+## AI 챗 변경 확장 (2026-10-16)
+- `ChangeService`에 동작 4가지 추가: `list_add`/`list_remove`(전역 화이트·블랙리스트), `release`/`delete_mail`(격리 메일 복구·삭제). 흐름은 룰 변경과 같다(제안 → 관리자 [적용] → 1회용·10분·본인만, 변경 이력 기록).
+- 서버 검증: 주소는 `user@domain` 또는 `@domain`(도메인만 말하면 자동 변환), 중복·반대 리스트 존재 거절, 이미 복구된/없는/원문 없는 격리 메일 거절, 적용 시점에 상태 재확인. 경고: 화이트 도메인 와일드카드, 격리 삭제(복구 불가), 스팸 태그 사본 복구(중복 수신).
+- 사용자별 리스트(recipient 지정)는 챗에서 다루지 않는다(전역만).
+- 테스트 `ChangeServiceExtTest` 7건(전체 235건). `tools/chat-bench.js`에 11문항 추가(70문항) — **egov 배포·측정은 미완료**.
+- egov 배포: 새 jar가 `/home/egov/hedwig_spam_prod/hedwig-spam-gateway.jar`에 복사됐으나 재시작은 하지 않았다(실행 중 프로세스는 이전 코드). 재시작: root로 `GATEWAY_PNAME=HEDWIG_SPAM_GATEWAY_PROD JAVA_HOME=/usr/lib/jvm/java-8-openjdk-amd64 bin/stop.sh && bin/start.sh`. 롤백 jar: `.bak_20261016_prelistchg`.
