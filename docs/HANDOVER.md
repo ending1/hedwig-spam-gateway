@@ -163,3 +163,9 @@ gateway:
 - 벤치마크 채점은 기간 이름이 아니라 날짜 범위로 비교한다(월요일의 '이번 주'는 '오늘'과 같은 범위라 서버 응답 이름이 today로 나오는 것이 정상).
 - 이 PC(CPU, RAM 16GB) `qwen2.5:7b`: 의도 67/70, 값 74/74, 중앙값 5.6초. 모델 저장 위치는 `D:\ollama-models`(사용자 환경변수 `OLLAMA_MODELS`). 남은 오분류: "도메인 위조 메일"(→STATS_TOP), "모든 룰을 삭제"(→CHANGE_PROPOSAL, 무해), "블랙리스트에 뭐가 있어?"(리스트 조회 미지원).
 - kube 서버는 부하 시 응답이 끊기는 장애가 반복되어 검증을 보류. 운영 챗은 임시로 Gemini(`gateway.chat.provider: gemini`).
+
+## AI 챗 리스트 조회 (2026-10-19)
+- 새 의도 `LIST_VIEW`(params: list=white|black|all, keyword): 전역·수신자별 화이트/블랙리스트를 표로 보여 준다(최대 15건, 전체 건수 요약). 읽기 전용. `ChatService` 생성자에 `MailListService`가 추가됨(9인자 생성자는 null로 위임).
+- 리스트 변경(list_add/list_remove)의 대상은 질문에 이메일 주소가 있으면 서버가 질문에서 직접 꺼낸다(`ChatService.listTarget`): 7B 모델이 `spam@x.com`을 `@x.com`으로 줄이는 사례가 있었음.
+- 챗 벤치 73문항(qwen2.5:7b, 이 PC): 의도 71/73, 값 78/78. 남은 오분류는 "도메인 위조 메일"(→STATS_TOP)과 "모든 룰을 삭제"(→CHANGE_PROPOSAL, 무해).
+- 주의: 캐시가 `gateway.mail-list.enabled=true`일 때만 갱신되므로 꺼져 있으면 조회·변경 모두 의미가 없다.

@@ -111,7 +111,10 @@ const CASES = [
   ["보류된 7번 메일 정상으로 전달해 주세요", "CHANGE_PROPOSAL", { action: "release" }],
   ["격리함 5번 메일 삭제해줘", "CHANGE_PROPOSAL", { action: "delete_mail" }],
   ["격리 메일 9번 지워 주세요", "CHANGE_PROPOSAL", { action: "delete_mail" }],
-  ["블랙리스트에 뭐가 있어?", "UNKNOWN", {}],
+  ["블랙리스트에 뭐가 있어?", "LIST_VIEW", { list: "black" }],
+  ["허용 목록에 등록된 도메인 보여줘", "LIST_VIEW", { list: "white" }],
+  ["partner.co.kr 이 차단 목록에 있어?", "LIST_VIEW", { list: "black" }],
+  ["화이트리스트 블랙리스트 전체 목록 알려줘", "LIST_VIEW", { list: "all" }],
 ];
 
 async function ask(q) {

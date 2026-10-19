@@ -15,6 +15,7 @@ import com.hs.mail.gateway.spamfilter.SpamRuleEntry;
 import com.hs.mail.gateway.spamfilter.SpamRuleService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -70,11 +71,21 @@ public class ChatService {
     private final GatewayProperties.Chat config;
     private final ChangeService changes;
     private final RuleSemanticSearch semantic;
+    private final com.hs.mail.gateway.maillist.MailListService mailList;
 
     public ChatService(IntentModel model, MailEventService events, SpamRuleService rules, RuleStatService ruleStats,
                        SpamReportService reports, ChangeService changes,
                        com.hs.mail.gateway.quarantine.QuarantineService quarantine, RuleSemanticSearch semantic,
                        GatewayProperties properties) {
+        this(model, events, rules, ruleStats, reports, changes, quarantine, semantic, properties, null);
+    }
+
+    @Autowired
+    public ChatService(IntentModel model, MailEventService events, SpamRuleService rules, RuleStatService ruleStats,
+                       SpamReportService reports, ChangeService changes,
+                       com.hs.mail.gateway.quarantine.QuarantineService quarantine, RuleSemanticSearch semantic,
+                       GatewayProperties properties, com.hs.mail.gateway.maillist.MailListService mailList) {
+        this.mailList = mailList;
         this.semantic = semantic;
         this.changes = changes;
         this.quarantine = quarantine;
@@ -99,6 +110,7 @@ public class ChatService {
                 + "- EVENT_SEARCH: 개별 메일의 처리 결과/판정 사유 조회(특정 발신자, 발신 IP, 도메인의 메일이 어떻게 처리됐는지, 왜 스팸으로 판정됐는지, 최근 스팸/거부된 메일 목록). 집계가 아니라 메일 낱개를 보는 질문이다. params: sender(주소 또는 도메인 일부, 없으면 빈 문자열), ip(없으면 빈 문자열), action(ALL|HAM|SPAM|REJECTED|DEFERRED, 기본 ALL), limit(기본 5)\n"
                 + "- QUARANTINE_SUMMARY: 격리함/보류(전달 안 된) 메일 현황 조회. params: status(HELD|ALL, 보류만 보려면 HELD, 기본 HELD)\n"
                 + "- STATS_AUTH: 발신 인증(SPF/DKIM/DMARC) 결과 분포, 사칭/위조 메일 현황. params: period\n"
+                + "- LIST_VIEW: 화이트리스트(허용)/블랙리스트(차단) 목록 조회. params: list(white|black|all, 말하지 않았으면 all), keyword(특정 주소/도메인을 찾을 때, 없으면 빈 문자열)\n"
                 + "- RULE_LIST: 룰 조회. params: keyword(없으면 빈 문자열)\n"
                 + "- RULE_STATS: 특정 룰의 적중 현황. params: ruleId(숫자, 특정 룰 지정이 없으면 0)\n"
                 + "- REPORT_PENDING: 검토 대기 중인 사용자 신고 조회. params: 없음\n"
@@ -165,6 +177,8 @@ public class ChatService {
                 return eventSearch(p);
             case "QUARANTINE_SUMMARY":
                 return quarantineSummary(p);
+            case "LIST_VIEW":
+                return listView(p);
             case "RULE_LIST":
                 return ruleList(p);
             case "RULE_STATS":
@@ -359,6 +373,54 @@ public class ChatService {
             long ham = get(e.getValue(), MailEvent.HAM), spam = get(e.getValue(), MailEvent.SPAM),
                     rej = get(e.getValue(), MailEvent.REJECTED), def = get(e.getValue(), MailEvent.DEFERRED);
             r.rows.add(Arrays.<Object>asList(e.getKey(), ham, spam, rej, def, pct(spam, ham + spam + rej + def)));
+        }
+        return r;
+    }
+
+    private Reply listView(JsonNode p) {
+        Reply r = base("LIST_VIEW");
+        String v = p.path("list").asText("all").toLowerCase(Locale.ROOT);
+        String list = v.startsWith("white") ? "white" : v.startsWith("black") ? "black" : "all";
+        String kw = cut(p.path("keyword").asText("")).trim().toLowerCase(Locale.ROOT);
+        r.params.put("list", list);
+        r.params.put("keyword", kw);
+        if (mailList == null) {
+            r.answer = "화이트/블랙리스트 기능을 쓸 수 없습니다.";
+            return r;
+        }
+        List<com.hs.mail.gateway.maillist.MailListEntry> all = mailList.list();
+        int white = 0, black = 0;
+        List<com.hs.mail.gateway.maillist.MailListEntry> hit = new ArrayList<>();
+        for (com.hs.mail.gateway.maillist.MailListEntry e : all) {
+            boolean isWhite = e.getListType() == com.hs.mail.gateway.maillist.MailListEntry.ListType.WHITE;
+            if (isWhite) {
+                white++;
+            } else {
+                black++;
+            }
+            if (list.equals("white") && !isWhite || list.equals("black") && isWhite) {
+                continue;
+            }
+            if (!kw.isEmpty() && !e.getPattern().toLowerCase(Locale.ROOT).contains(kw)
+                    && !(e.getRecipient() != null && e.getRecipient().toLowerCase(Locale.ROOT).contains(kw))) {
+                continue;
+            }
+            hit.add(e);
+        }
+        String which = list.equals("white") ? "화이트리스트" : list.equals("black") ? "블랙리스트" : "화이트/블랙리스트";
+        if (hit.isEmpty()) {
+            r.answer = (kw.isEmpty() ? which + "에 등록된 항목이 없습니다." : which + "에서 '" + kw + "'와 맞는 항목이 없습니다.")
+                    + " (전체: 화이트 " + white + "건, 블랙 " + black + "건)";
+            return r;
+        }
+        int shown = Math.min(15, hit.size());
+        r.answer = which + (kw.isEmpty() ? "" : " 중 '" + kw + "'") + " " + hit.size() + "건입니다(전체: 화이트 " + white + "건, 블랙 " + black + "건)."
+                + (hit.size() > shown ? " 최근 " + shown + "건만 보여 드립니다. 추가·삭제는 챗에서 요청하거나 화이트·블랙리스트 탭에서 합니다." : "");
+        r.columns = Arrays.asList("구분", "주소/도메인", "적용 대상", "사유");
+        for (int i = 0; i < shown; i++) {
+            com.hs.mail.gateway.maillist.MailListEntry e = hit.get(i);
+            r.rows.add(Arrays.<Object>asList(e.getListType() == com.hs.mail.gateway.maillist.MailListEntry.ListType.WHITE ? "화이트" : "블랙",
+                    cut(e.getPattern()), e.isGlobal() ? "전체" : cut(e.getRecipient()), cut(e.getReason() == null ? "" : e.getReason())));
         }
         return r;
     }
@@ -604,6 +666,17 @@ public class ChatService {
         return r;
     }
 
+    private static final java.util.regex.Pattern EMAIL_IN_TEXT = java.util.regex.Pattern.compile("[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}");
+
+    /**
+     * 리스트 변경의 대상은 질문에 적힌 이메일 주소가 있으면 그것을 우선한다. 작은 모델이 주소를 도메인으로 줄이는 일이 있어
+     * ("spam@bad.example" → "@bad.example") 서버가 질문에서 직접 꺼낸다. 이메일이 없으면 모델이 준 값을 그대로 쓴다.
+     */
+    static String listTarget(String modelTarget, String question) {
+        java.util.regex.Matcher m = EMAIL_IN_TEXT.matcher(question == null ? "" : question);
+        return m.find() ? m.group() : modelTarget;
+    }
+
     private Reply changeProposal(JsonNode p, String actor) {
         Reply r = base("CHANGE_PROPOSAL");
         String action = whitelist(p.path("action").asText(""), "add", "disable", "enable", "set_weight", "list_add", "list_remove", "release", "delete_mail");
@@ -611,7 +684,11 @@ public class ChatService {
         r.params.put("target", cut(p.path("target").asText("")));
         r.params.put("value", cut(p.path("value").asText("")));
         try {
-            ChangeService.Proposal prop = changes.propose(action, p.path("target").asText(""), p.path("value").asText(""), actor);
+            String target = p.path("target").asText("");
+            if (action.startsWith("list_")) {
+                target = listTarget(target, p.path(Q_KEY).asText(""));
+            }
+            ChangeService.Proposal prop = changes.propose(action, target, p.path("value").asText(""), actor);
             r.answer = "다음 변경을 제안합니다. 아래 내용을 확인하고 [적용]을 눌러야 반영됩니다(10분 안에).";
             r.proposal = prop.toMap();
         } catch (ChangeService.ChangeException e) {
