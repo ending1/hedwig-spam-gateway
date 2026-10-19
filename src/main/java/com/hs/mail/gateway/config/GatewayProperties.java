@@ -661,6 +661,32 @@ public class GatewayProperties {
         private final Gemini gemini = new Gemini();
         private final Claude claude = new Claude();
         private final Rag rag = new Rag();
+        private final Cache cache = new Cache();
+
+        public Cache getCache() {
+            return cache;
+        }
+
+        /** LLM 판정 캐시(같은 캠페인 재호출 방지). 기본 꺼짐. 환경변수 예: GATEWAY_SPAMFILTER_CACHE_ENABLED=true */
+        public static class Cache {
+            private boolean enabled = false;
+            private int spamTtlMinutes = 1440;
+            private int hamTtlMinutes = 360;
+            private int maxEntries = 5000;
+            private int minTextChars = 30;
+
+            public boolean isEnabled() { return enabled; }
+            public void setEnabled(boolean enabled) { this.enabled = enabled; }
+            public int getSpamTtlMinutes() { return spamTtlMinutes; }
+            public void setSpamTtlMinutes(int spamTtlMinutes) { this.spamTtlMinutes = spamTtlMinutes; }
+            public int getHamTtlMinutes() { return hamTtlMinutes; }
+            public void setHamTtlMinutes(int hamTtlMinutes) { this.hamTtlMinutes = hamTtlMinutes; }
+            public int getMaxEntries() { return maxEntries; }
+            public void setMaxEntries(int maxEntries) { this.maxEntries = maxEntries; }
+            public int getMinTextChars() { return minTextChars; }
+            public void setMinTextChars(int minTextChars) { this.minTextChars = minTextChars; }
+        }
+
 
         public boolean isEnabled() {
             return enabled;

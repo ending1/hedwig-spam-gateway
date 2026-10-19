@@ -14,16 +14,21 @@ public class SpamClassifierConfig {
         if (!config.isEnabled()) {
             return new NoopSpamClassifier();
         }
+        SpamClassifier base;
         switch (config.getProvider()) {
             case GEMMA_LOCAL:
-                return new GemmaOllamaClassifier(config, rag);
+                base = new GemmaOllamaClassifier(config, rag);
+                break;
             case GEMINI:
-                return new GeminiClassifier(config, rag);
+                base = new GeminiClassifier(config, rag);
+                break;
             case CLAUDE:
-                return new ClaudeClassifier(config, rag);
+                base = new ClaudeClassifier(config, rag);
+                break;
             case NONE:
             default:
                 return new NoopSpamClassifier();
         }
+        return config.getCache().isEnabled() ? new CachingSpamClassifier(base, config.getCache()) : base;
     }
 }

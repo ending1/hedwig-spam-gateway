@@ -177,3 +177,10 @@ gateway:
 - 속도(CPU 서버 kube, 긴 프롬프트): qwen3:30b 판정 1건당 약 30초(소형 질의는 0.6초). 인라인 SMTP 판정에는 느리므로 애매한 메일만 보내거나 비동기/보류와 함께 써야 한다.
 - 설정만으로 전환 가능: `spam-filter.provider: gemma-local`, `gemma.base-url`, `gemma.model: qwen3:30b`. `GemmaOllamaClassifier`가 `think:false`를 보낸다(없으면 qwen3는 추론으로 수 분 소요).
 - Ollama는 클라이언트가 타임아웃으로 끊은 요청도 계속 처리하므로 대기열이 밀린다(평가 중 실제 발생).
+
+## LLM 판정 캐시 (2026-10-20)
+- `CachingSpamClassifier`(판정기를 감싸는 데코레이터, `SpamClassifierConfig`에서 `gateway.spam-filter.cache.enabled=true`일 때 적용, **기본 꺼짐**). 키 = 발신 도메인 + DMARC 결과 + 정규화한 본문(소문자, URL/이메일/숫자/기호 제거). 본문 정규화 200자 이상이면 제목과 앞 40자(인사말·이름)를 빼고 뒤 600자만 사용, 짧으면 제목+본문 전체. 내용이 30자 미만이면 캐시 안 함.
+- 성공한 판정만 저장(오류는 저장 안 함, 기존 fail-open 유지). 스팸 TTL `spam-ttl-minutes`=1440, 정상 `ham-ttl-minutes`=360(0이면 저장 안 함), `max-entries`=5000(LRU), 메모리 전용(재시작 시 비움). 적중하면 사유에 `[캐시]`가 붙고 필터는 그대로 LLM으로 집계된다.
+- 상태 조회: `GET /admin/llm-cache` (hits/misses/skipped/hitRate/size).
+- 시뮬레이션(`tools/CacheSim.java`, 사내 2개월 코퍼스, TTL 무시): 룰이 못 잡은 스팸 9,266건 → LLM 호출 3,320건(약 64% 절감), 정상 대용 138건 → 83건(약 40%). TTL(24h)을 적용하면 절감은 이보다 낮다(상한치). 실제 비율은 운영 트래픽에서 `/admin/llm-cache`로 확인할 것.
+- 위험: 같은 내용을 다른 판정으로 받아야 하는 경우(신고로 판정이 바뀐 직후)에는 TTL 동안 이전 판정이 쓰인다. 필요하면 재시작 또는 TTL 단축.
