@@ -169,3 +169,11 @@ gateway:
 - 리스트 변경(list_add/list_remove)의 대상은 질문에 이메일 주소가 있으면 서버가 질문에서 직접 꺼낸다(`ChatService.listTarget`): 7B 모델이 `spam@x.com`을 `@x.com`으로 줄이는 사례가 있었음.
 - 챗 벤치 73문항(qwen2.5:7b, 이 PC): 의도 71/73, 값 78/78. 남은 오분류는 "도메인 위조 메일"(→STATS_TOP)과 "모든 룰을 삭제"(→CHANGE_PROPOSAL, 무해).
 - 주의: 캐시가 `gateway.mail-list.enabled=true`일 때만 갱신되므로 꺼져 있으면 조회·변경 모두 의미가 없다.
+
+## 스팸 판정 LLM 비교 (2026-10-19~20, tools/LlmEval.java)
+- 같은 메일(룰이 못 잡은 사내 코퍼스 스팸 30건, 외부 벤더 정상 대용 20건)을 Gemini / 로컬 Ollama 모델 / 로컬+RAG로 판정. 표본이 작고 정상 라벨은 노이즈가 커서(README의 RAG 평가 주의 참고) 경향만 본다.
+- 스팸 탐지(30건 중): Gemini 27~28, **qwen2.5:7b 14, 7b+RAG 18**, **qwen3:30b 28, 30b+RAG 20**. → 7B는 부적합, 30B(MoE)는 Gemini급, RAG는 강한 모델에서 오히려 손해.
+- 정상 대용 오탐: Gemini 3/17, qwen3:30b 6/17(+RAG 4), qwen2.5:7b 1/14(스팸을 거의 못 잡는 모델이라 낮음). 오류(타임아웃)는 1~6건.
+- 속도(CPU 서버 kube, 긴 프롬프트): qwen3:30b 판정 1건당 약 30초(소형 질의는 0.6초). 인라인 SMTP 판정에는 느리므로 애매한 메일만 보내거나 비동기/보류와 함께 써야 한다.
+- 설정만으로 전환 가능: `spam-filter.provider: gemma-local`, `gemma.base-url`, `gemma.model: qwen3:30b`. `GemmaOllamaClassifier`가 `think:false`를 보낸다(없으면 qwen3는 추론으로 수 분 소요).
+- Ollama는 클라이언트가 타임아웃으로 끊은 요청도 계속 처리하므로 대기열이 밀린다(평가 중 실제 발생).

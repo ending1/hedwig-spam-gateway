@@ -45,6 +45,7 @@ public class GemmaOllamaClassifier implements SpamClassifier, TextCompleter {
         payload.put("prompt", prompt);
         payload.put("stream", false);
         payload.put("format", "json");
+        payload.put("think", false); // qwen3 계열은 기본 추론이 켜져 있어 판정 한 건에 수 분이 걸린다
 
         String url = config.getGemma().getBaseUrl().replaceAll("/$", "") + "/api/generate";
         String responseBody = HttpJsonClient.postJson(url, Collections.emptyMap(),
