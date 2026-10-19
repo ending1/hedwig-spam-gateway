@@ -156,3 +156,10 @@ gateway:
 - 주의: 이 모드에서는 관리자 질문과 룰 패턴 텍스트가 Google로 전송된다(Ollama 모드는 사내망 안).
 - 70문항 측정: Gemini 의도 69/70·값 74/74(중앙값 0.96초) / 로컬 PC gemma:7b(구형) 11/70 — 의도 분류에는 부적합 / kube qwen3-coder:30b 68/70.
 - 메모: 화이트/블랙리스트 캐시는 `gateway.mail-list.enabled=true`일 때만 갱신된다(꺼져 있으면 챗 리스트 변경이 화면에 안 보임).
+
+## 작은 로컬 모델 대응 (2026-10-19)
+- `OllamaIntentModel`이 `think:false`를 보낸다(qwen3 계열은 기본 추론이 켜져 사소한 요청에도 40초 이상 걸림. qwen3-coder 등에서도 무해).
+- `ChatService.fixDomainDimension`: 질문에 '도메인'이 있는데 모델이 발신자 등을 골랐으면 서버가 발신 도메인(수신/받은 표현이 있으면 수신 도메인)으로 바로잡는다.
+- 벤치마크 채점은 기간 이름이 아니라 날짜 범위로 비교한다(월요일의 '이번 주'는 '오늘'과 같은 범위라 서버 응답 이름이 today로 나오는 것이 정상).
+- 이 PC(CPU, RAM 16GB) `qwen2.5:7b`: 의도 67/70, 값 74/74, 중앙값 5.6초. 모델 저장 위치는 `D:\ollama-models`(사용자 환경변수 `OLLAMA_MODELS`). 남은 오분류: "도메인 위조 메일"(→STATS_TOP), "모든 룰을 삭제"(→CHANGE_PROPOSAL, 무해), "블랙리스트에 뭐가 있어?"(리스트 조회 미지원).
+- kube 서버는 부하 시 응답이 끊기는 장애가 반복되어 검증을 보류. 운영 챗은 임시로 Gemini(`gateway.chat.provider: gemini`).

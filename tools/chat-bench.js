@@ -10,6 +10,24 @@ const local = (ago) => { const d = new Date(Date.now() - ago * DAY); return d; }
 const md = (ago) => (local(ago).getMonth() + 1) + "월 " + local(ago).getDate() + "일";
 const dd = (ago) => local(ago).getDate();
 const isoLocal = (ago) => { const d = local(ago); return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()); };
+const fmt = (d) => d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate());
+const shift = (d, n) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
+// 서버(StatsPeriod.named)와 같은 정의로 기간 이름을 날짜 범위로 바꾼다
+function rangeOf(name) {
+  const t = new Date(); const today = new Date(t.getFullYear(), t.getMonth(), t.getDate());
+  const mon = shift(today, -((today.getDay() + 6) % 7));
+  switch (String(name).toLowerCase()) {
+    case "today": return [today, today];
+    case "yesterday": return [shift(today, -1), shift(today, -1)];
+    case "last7d": return [shift(today, -6), today];
+    case "last30d": return [shift(today, -29), today];
+    case "thisweek": return [mon, today];
+    case "lastweek": return [shift(mon, -7), shift(mon, -1)];
+    case "thismonth": return [new Date(today.getFullYear(), today.getMonth(), 1), today];
+    case "lastmonth": return [new Date(today.getFullYear(), today.getMonth() - 1, 1), new Date(today.getFullYear(), today.getMonth(), 0)];
+    default: return null;
+  }
+}
 const CASES = [
   // 요약
   ["어제 스팸 몇 건이야?", "STATS_SUMMARY", { period: "yesterday" }],
@@ -121,7 +139,9 @@ async function ask(q) {
       paramTotal++;
       if (k === "_minRows") { const n = (r.body.rows || []).length; if (n >= exp[k]) paramOk++; else { pOk = false; pBad.push("행 수 기대 >=" + exp[k] + " / 결과 " + n); } continue; }
       const want = String(exp[k]).toLowerCase(), have = String(params[k]).toLowerCase();
-      if (want === have) paramOk++; else { pOk = false; pBad.push(k + ": 기대 " + exp[k] + " / 결과 " + params[k]); }
+      const rg = k === "period" ? rangeOf(exp[k]) : null;
+      const sameRange = rg && params.from === fmt(rg[0]) && params.to === fmt(rg[1]);
+      if (want === have || sameRange) paramOk++; else { pOk = false; pBad.push(k + ": 기대 " + exp[k] + " / 결과 " + params[k]); }
     }
     if (i) intentOk++;
     if (i && pOk) fullOk++;

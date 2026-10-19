@@ -278,6 +278,22 @@ public class ChatService {
         return r;
     }
 
+    /**
+     * 작은 모델이 "도메인 상위"를 sender로 잘못 고르는 경우를 바로잡는다. 질문에 '도메인'이 있고 수신 쪽 표현(수신/받은/받는)이
+     * 없으면 발신 도메인, 있으면 수신 도메인이다. 모델이 IP나 필터를 골랐으면 건드리지 않는다.
+     */
+    static MailEventDao.Dimension fixDomainDimension(MailEventDao.Dimension dim, String question) {
+        String q = question == null ? "" : question.replaceAll("\\s+", "");
+        if (!q.contains("도메인") || q.contains("IP") || q.toLowerCase(Locale.ROOT).contains("ip") || q.contains("필터")) {
+            return dim;
+        }
+        boolean recipientSide = q.contains("수신") || q.contains("받은") || q.contains("받는") || q.contains("받아");
+        if (recipientSide) {
+            return MailEventDao.Dimension.RECIPIENT_DOMAIN;
+        }
+        return MailEventDao.Dimension.DOMAIN;
+    }
+
     private Reply top(JsonNode p) {
         String per = period(p);
         StatsPeriod sp = resolvePeriod(p, per);
@@ -285,6 +301,7 @@ public class ChatService {
         if (dim == null) {
             dim = MailEventDao.Dimension.DOMAIN;
         }
+        dim = fixDomainDimension(dim, p.path(Q_KEY).asText(""));
         String action = p.path("action").asText(dim == MailEventDao.Dimension.FILTER ? "ALL" : "SPAM").toUpperCase(Locale.ROOT);
         if (!ACTIONS.contains(action)) {
             action = dim == MailEventDao.Dimension.FILTER ? "ALL" : "SPAM";

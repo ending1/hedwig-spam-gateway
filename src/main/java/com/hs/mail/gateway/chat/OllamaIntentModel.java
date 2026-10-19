@@ -59,6 +59,7 @@ public class OllamaIntentModel implements IntentModel {
         body.put("model", config.getModel());
         body.put("stream", false);
         body.put("format", "json");
+        body.put("think", false); // qwen3 계열은 기본 추론이 켜져 있어 의도 분류에는 수십 초가 낭비된다
         body.put("keep_alive", config.getKeepAlive());
         ObjectNode options = body.putObject("options");
         options.put("temperature", 0);
