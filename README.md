@@ -122,9 +122,9 @@ curl -X DELETE http://localhost:8090/admin/spam-rules/42
 - API: `/admin/stats/{summary,daily,top}`, `/admin/events`, `/admin/events/export.csv`
 
 ### 8-7. 관리자 AI 챗 (읽기 전용)
-- 대시보드 "AI 챗" 탭. 로컬 LLM(Ollama, 기본 `qwen3-coder:30b`)이 질문의 **의도와 값만** JSON으로 뽑고, 조회와 답변은 서버의 고정 코드가 한다. 모델이 SQL이나 임의 동작을 만들 수 없고, 메일 내용이 모델에 다시 들어가지 않는다.
+- 대시보드 "AI 챗" 탭. 로컬 LLM(Ollama, 기본 `qwen2.5:7b`, Apache 2.0, 메모리 8GB 안팎)이 질문의 **의도와 값만** JSON으로 뽑고, 조회와 답변은 서버의 고정 코드가 한다. 모델이 SQL이나 임의 동작을 만들 수 없고, 메일 내용이 모델에 다시 들어가지 않는다.
 - 답할 수 있는 것: 기간별 처리 요약, 항목별 상위, 일자별 추이, 발신 인증(SPF/DKIM/DMARC) 결과, 룰 조회, 룰 적중 현황, 검토 대기 신고, 격리함/보류 메일 현황(건수와 최근 보류 메일). 룰/설정 변경 요청은 안내만 하고 바꾸지 않는다(다음 단계에서 "제안 후 관리자 확인"으로 확장 예정).
-- 설정: `gateway.chat.base-url`(환경변수 `GATEWAY_CHAT_BASEURL`), `gateway.chat.model`(`GATEWAY_CHAT_MODEL`). 소량 질문 20개 측정에서 의도 분류 정확도 qwen3-coder:30b 20/20, qwen2.5:14b 19/20, gemma:7b 10/20(CPU 서버 기준 평균 약 1초, 첫 호출은 모델 적재로 10초 이상).
+- 설정: `gateway.chat.base-url`(환경변수 `GATEWAY_CHAT_BASEURL`), `gateway.chat.model`(`GATEWAY_CHAT_MODEL`). **제품 기본 모델은 qwen2.5:7b**입니다(70여 문항 측정: 의도 71/73, 값 78/78, CPU에서 중앙값 약 5.6초 — GPU가 있으면 1초대. 첫 호출은 모델 적재로 오래 걸림). 임시로 `gateway.chat.provider: gemini`(스팸 분류용 Gemini 키 공유, 질문이 사외로 전송됨)도 쓸 수 있습니다. 소량 질문 20개 측정에서 의도 분류 정확도 qwen3-coder:30b 20/20, qwen2.5:14b 19/20, gemma:7b 10/20(CPU 서버 기준 평균 약 1초, 첫 호출은 모델 적재로 10초 이상).
 
 (조회 확장) 한국어 날짜/기간("10월 5일부터 7일까지", "3일 전", "지난주"), 개별 메일 검색(발신자/IP/처리결과), 룰 의미 검색(bge-m3, `gateway.chat.embed-model`, `gateway.chat.semantic-min-similarity`)을 지원합니다. 날짜는 서버가 해석하며 임베딩 불가 시 문자열 검색으로 대체됩니다.
 

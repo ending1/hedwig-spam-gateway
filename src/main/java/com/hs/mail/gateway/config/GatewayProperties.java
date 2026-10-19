@@ -264,7 +264,7 @@ public class GatewayProperties {
     public static class Chat {
         private boolean enabled = true;
         private String baseUrl = "";
-        private String model = "qwen3-coder:30b";
+        private String model = "qwen2.5:7b";
         private int timeoutMillis = 60000;
         private String keepAlive = "30m";
         /** 룰 의미 검색용 임베딩 모델(같은 Ollama 서버). 비우면 의미 검색을 끄고 문자열 일치만 쓴다. */
